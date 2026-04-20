@@ -90,7 +90,7 @@ export default function Dashboard() {
 
   return (
     <div className="view">
-      <div className="view-header"><h2>Dashboard</h2><p>{periodLabel()}</p></div>
+      <div className="view-header"><h2>Dashboard v2</h2><p>{periodLabel()}</p></div>
 
       <div className="cards-grid">
         <div className="stat-card card-blue"><div className="card-label">Ingresos</div><div className="card-value">{fmt(kpis.ingresos)}</div><div className="card-sub">{kpis.ordenes} órdenes</div></div>
