@@ -185,9 +185,8 @@ export default function Presupuesto() {
       </div>
 
       {/* Modal */}
-      {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+      <div className="modal-overlay" style={{ display: showForm ? 'flex' : 'none', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowForm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 8, padding: 24, width: '100%', maxWidth: 420, margin: '0 auto' }}>
             <div className="modal-header">
               <h3>{editDoc ? 'Editar presupuesto' : 'Nuevo presupuesto'}</h3>
               <button onClick={() => setShowForm(false)}>✕</button>
@@ -223,7 +222,6 @@ export default function Presupuesto() {
             </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
   )
 }
