@@ -78,7 +78,6 @@ export default function Presupuesto() {
     load()
   }
 
-  // KPIs globales
   const totalPresupuestado = presupuestos.reduce((s, p) => s + parseFloat(p.monto || 0), 0)
   const totalGastado = presupuestos.reduce((s, p) => s + (egresos[p.categoria] || 0), 0)
   const totalDisponible = totalPresupuestado - totalGastado
@@ -93,7 +92,6 @@ export default function Presupuesto() {
         <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nuevo presupuesto</button>
       </div>
 
-      {/* KPIs */}
       <div className="cards-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
         <div className="stat-card card-blue">
           <div className="card-label">Total presupuestado</div>
@@ -112,7 +110,6 @@ export default function Presupuesto() {
         </div>
       </div>
 
-      {/* Tabla de presupuestos */}
       <div className="table-card">
         <div className="table-card-header"><h3>Detalle por categoría</h3></div>
         {loading
@@ -149,9 +146,7 @@ export default function Presupuesto() {
                         </td>
                         <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.descripcion || '—'}</td>
                         <td className="text-right">{fmt(p.monto)}</td>
-                        <td className="text-right" style={{ color: superado ? 'var(--danger)' : 'inherit' }}>
-                          {fmt(gastado)}
-                        </td>
+                        <td className="text-right" style={{ color: superado ? 'var(--danger)' : 'inherit' }}>{fmt(gastado)}</td>
                         <td className="text-right" style={{ fontWeight: 700, color: disponible >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                           {disponible >= 0 ? fmt(disponible) : `−${fmt(Math.abs(disponible))}`}
                         </td>
@@ -161,8 +156,7 @@ export default function Presupuesto() {
                               <div style={{
                                 height: '100%', borderRadius: 4,
                                 background: superado ? 'var(--danger)' : pct > 80 ? '#f59e0b' : 'var(--success)',
-                                width: `${pct}%`,
-                                transition: 'width .3s'
+                                width: `${pct}%`, transition: 'width .3s'
                               }} />
                             </div>
                             <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 32 }}>{pct.toFixed(0)}%</span>
@@ -184,44 +178,87 @@ export default function Presupuesto() {
         }
       </div>
 
-      {/* Modal */}
-      <div className="modal-overlay" style={{ display: showForm ? 'flex' : 'none', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowForm(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 8, padding: 24, width: '100%', maxWidth: 420, margin: '0 auto' }}>
-            <div className="modal-header">
-              <h3>{editDoc ? 'Editar presupuesto' : 'Nuevo presupuesto'}</h3>
-              <button onClick={() => setShowForm(false)}>✕</button>
+      {/* Modal — fuera de cualquier otro div para evitar conflictos de z-index */}
+      {showForm && (
+        <div
+          onClick={() => setShowForm(false)}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.55)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 16px'
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 10, width: '100%', maxWidth: 440,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)', overflow: 'hidden'
+            }}
+          >
+            {/* Header */}
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{editDoc ? 'Editar presupuesto' : 'Nuevo presupuesto'}</h3>
+              <button onClick={() => setShowForm(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#666', lineHeight: 1 }}>✕</button>
             </div>
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* Body */}
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label className="field-label">Categoría</label>
-                <select className="field-input" value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Categoría</label>
+                <select
+                  value={form.categoria}
+                  onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none' }}
+                >
                   <option value="">Elegir categoría...</option>
                   {['alquiler','insumos','credito','sueldos','marketing','impuestos','maquinaria','suscripciones','varios'].map(c => (
-                    <option key={c} value={c}>{getCat(c).nombre}</option>
+                    <option key={c} value={c}>{getCat(c)?.nombre || c}</option>
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="field-label">Monto presupuestado ($)</label>
-                <input className="field-input" type="number" min="0" value={form.monto}
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Monto presupuestado ($)</label>
+                <input
+                  type="number" min="0"
+                  value={form.monto}
                   onChange={e => setForm(f => ({ ...f, monto: e.target.value }))}
-                  placeholder="Ej: 150000" />
+                  placeholder="Ej: 150000"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+                />
               </div>
+
               <div>
-                <label className="field-label">Descripción (opcional)</label>
-                <input className="field-input" type="text" value={form.descripcion}
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Descripción (opcional)</label>
+                <input
+                  type="text"
+                  value={form.descripcion}
                   onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}
-                  placeholder="Ej: 2 empleados a $75.000 c/u" />
+                  placeholder="Ej: 2 empleados a $75.000 c/u"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+                />
               </div>
             </div>
-            <div className="modal-footer">
-              <button className="btn" onClick={() => setShowForm(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={save}>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => setShowForm(false)}
+                style={{ padding: '8px 18px', border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', cursor: 'pointer', fontSize: 14 }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={save}
+                style={{ padding: '8px 18px', border: 'none', borderRadius: 6, background: '#2e509e', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+              >
                 {editDoc ? 'Guardar cambios' : 'Crear presupuesto'}
               </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
+    </div>
   )
 }
