@@ -140,20 +140,56 @@ export default function Compromisos() {
   const confirmarPago = async () => {
     const monto = parseFloat(pagarForm.monto)
     if (!monto) { toast('Ingresá un monto', 'error'); return }
+
     // Crear egreso
-    await addDoc(collection(db, 'egresos'), { fecha: pagarForm.fecha, monto, categoria: pagarComp.categoria || 'varios', descripcion: `Pago: ${pagarComp.nombre}`, origen_compromiso: pagarComp.id, usuario: user.email, createdAt: new Date().toISOString() })
-    // Avanzar fecha si es cuotas o recurrente
+    await addDoc(collection(db, 'egresos'), {
+      fecha: pagarForm.fecha, monto,
+      categoria: pagarComp.categoria || 'varios',
+      descripcion: `Pago: ${pagarComp.nombre}`,
+      origen_compromiso: pagarComp.id,
+      usuario: user.email,
+      createdAt: new Date().toISOString()
+    })
+
     const updates = { updatedAt: new Date().toISOString() }
+
     if (pagarComp.tipo === 'cuotas') {
+      // Cuotas: avanza siempre (cada cuota es un pago completo)
       const pagadas = (pagarComp.cuotas_pagadas || 0) + 1
       updates.cuotas_pagadas = pagadas
       if (pagadas >= pagarComp.total_cuotas) updates.estado = 'finalizado'
       else updates.fecha_proximo_pago = nextDate(pagarForm.fecha, pagarComp.frecuencia)
+    } else if (pagarComp.categoria === 'sueldos') {
+      // Sueldos: verificar si el total pagado del período cubre el monto completo
+      // Recalcular sumando todos los egresos del período actual + este pago
+      const now = new Date()
+      const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+      const hoy = todayStr()
+      const snap = await getDocs(
+        query(collection(db, 'egresos'),
+          where('origen_compromiso', '==', pagarComp.id),
+          where('fecha', '>=', inicioMes),
+          where('fecha', '<=', hoy)
+        )
+      )
+      let totalPagado = monto // incluir el pago que acabamos de registrar
+      snap.forEach(d => { totalPagado += parseFloat(d.data().monto || 0) })
+
+      if (totalPagado >= parseFloat(pagarComp.monto)) {
+        // Pago completo — avanzar al próximo período
+        updates.fecha_proximo_pago = nextDate(pagarForm.fecha, pagarComp.frecuencia)
+        toast(`${pagarComp.nombre} — pago completo ✓`, 'success')
+      }
+      // Si es parcial, NO avanzar la fecha — queda en el período actual
     } else {
+      // Otros recurrentes: avanzar siempre
       updates.fecha_proximo_pago = nextDate(pagarForm.fecha, pagarComp.frecuencia)
     }
+
     await updateDoc(doc(db, 'compromisos', pagarComp.id), updates)
-    setShowPagar(false); toast('Pago registrado', 'success'); loadAll()
+    setShowPagar(false)
+    if (pagarComp.categoria !== 'sueldos') toast('Pago registrado', 'success')
+    loadAll()
   }
 
   const pagarAGIP = async () => {
