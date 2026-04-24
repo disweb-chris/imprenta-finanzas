@@ -56,31 +56,40 @@ export default function Compromisos() {
       const pagos = todosPagos[c.id] || []
       if (!pagos.length) return { ...c, monto_pagado: 0 }
 
-      // Calcular inicio del período actual según frecuencia
+      // Calcular inicio del período actual:
+      // El período arranca desde el último vencimiento pagado
+      // = fecha_proximo_pago menos la duración del período
       let inicioPeriodo
       if (c.fecha_proximo_pago) {
         const prox = new Date(c.fecha_proximo_pago + 'T00:00:00')
         if (c.frecuencia === 'semanal') {
-          // Período actual = desde hace 7 días hasta fecha_proximo_pago
+          // Período semanal = últimos 7 días antes del próximo vencimiento
           inicioPeriodo = new Date(prox.getTime() - 7 * 86400000)
         } else if (c.frecuencia === 'mensual') {
-          // Período actual = desde el mes anterior al próximo vencimiento
-          inicioPeriodo = new Date(prox.getFullYear(), prox.getMonth() - 1, prox.getDate())
+          // Período mensual = inicio del mes anterior al mes del próximo vencimiento
+          // Ej: próx vence 24/05 → período es todo abril = 01/04
+          inicioPeriodo = new Date(prox.getFullYear(), prox.getMonth() - 1, 1)
         } else {
-          inicioPeriodo = new Date(prox.getFullYear() - 1, prox.getMonth(), prox.getDate())
+          // Anual = inicio del año anterior al próximo vencimiento
+          inicioPeriodo = new Date(prox.getFullYear() - 1, prox.getMonth(), 1)
         }
       } else {
-        // Sin fecha próxima: usar inicio del mes
         inicioPeriodo = new Date(now.getFullYear(), now.getMonth(), 1)
       }
 
       const inicioStr = inicioPeriodo.toISOString().split('T')[0]
-      // Solo sumar pagos del período actual
+
+      // Sumar pagos del período actual
       const montoPagado = pagos
         .filter(p => p.fecha >= inicioStr && p.fecha <= hoy)
         .reduce((s, p) => s + p.monto, 0)
 
-      return { ...c, monto_pagado: montoPagado }
+      // Si ya pagó todo el período, mostrar monto_pagado = monto (completo)
+      // y no mostrar pendiente negativo
+      const montoCompromiso = parseFloat(c.monto || 0)
+      const montoPagadoFinal = Math.min(montoPagado, montoCompromiso)
+
+      return { ...c, monto_pagado: montoPagadoFinal, monto_pagado_real: montoPagado }
     })
   }
 
@@ -199,11 +208,16 @@ export default function Compromisos() {
           {c.categoria === 'sueldos' && pagado > 0 && (
             <div style={{ marginTop: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                <span style={{ color: 'var(--success)', fontWeight: 600 }}>✓ Pagado: {fmt(pagado)}</span>
-                <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Pendiente: {fmt(Math.max(monto - pagado, 0))}</span>
+                <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                  ✓ Pagado: {fmt(c.monto_pagado_real || pagado)}
+                  {(c.monto_pagado_real || pagado) > monto && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> (exceso: {fmt((c.monto_pagado_real || pagado) - monto)})</span>}
+                </span>
+                <span style={{ color: pagado >= monto ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                  {pagado >= monto ? '✓ Completo' : `Pendiente: ${fmt(monto - pagado)}`}
+                </span>
               </div>
               <div style={{ height: 4, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', background: pagado >= monto ? 'var(--success)' : 'var(--orange)', width: `${Math.min(pagado / monto * 100, 100)}%` }} />
+                <div style={{ height: '100%', background: pagado >= monto ? 'var(--success)' : 'var(--orange)', width: `${Math.min((c.monto_pagado_real || pagado) / monto * 100, 100)}%` }} />
               </div>
             </div>
           )}
