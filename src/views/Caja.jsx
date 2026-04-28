@@ -7,6 +7,35 @@ import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
+// ── Helper: calcular lo cobrado real de una orden ──────────────────────────
+// Si tiene historial de pagos (seña/saldo), suma solo lo cobrado hasta ahora.
+// Si no tiene historial, usa o.total (pago completo normal).
+function calcCobrado(order) {
+  const historial = order.io_pagos_historial
+  if (Array.isArray(historial) && historial.length > 0) {
+    return historial.reduce((s, p) => s + parseFloat(p.monto || 0), 0)
+  }
+  return parseFloat(order.total || 0)
+}
+
+// Helper: medio de pago cobrado de una orden
+// Para órdenes con historial, usamos el método del último pago registrado.
+// Para órdenes sin historial, usamos payment_method de WC.
+function getMedioCobro(order) {
+  const historial = order.io_pagos_historial
+  if (Array.isArray(historial) && historial.length > 0) {
+    // Tomar el método más reciente del historial
+    const ultimo = historial[historial.length - 1]
+    const metodo = (ultimo.metodo || '').toLowerCase()
+    if (metodo === 'efectivo') return 'efectivo'
+    return 'banco' // transferencia, mercadopago, etc → banco
+  }
+  // Sin historial: usar payment_method de WC
+  const pm = order.payment_method || ''
+  if (pm === 'cod') return 'efectivo'
+  return 'banco'
+}
+
 export default function Caja() {
   const { getCat } = useCats()
   const toast = useToast()
@@ -62,22 +91,14 @@ export default function Caja() {
       const saldoCierre = cierre ? parseFloat(cierre.saldo_final || 0) : 0
       let desdeTimestamp
       if (!cierre) {
-        // Sin cierre: desde inicio del mes
         desdeTimestamp = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
       } else if (cierre.timestamp) {
-        // Cierre nuevo con timestamp exacto
         desdeTimestamp = new Date(cierre.timestamp)
       } else {
-        // Cierre viejo sin timestamp: asumir fin del día del cierre (23:59:59)
-        // Así no incluye movimientos del mismo día que ya estaban en el saldo
         const [y, m, d] = cierre.fecha.split('-').map(Number)
         desdeTimestamp = new Date(y, m - 1, d, 23, 59, 59, 999)
       }
       const ahora = new Date()
-      // desdeFecha para egresos: día siguiente al cierre si tiene timestamp exacto, mismo día si no
-      const desdeFechaDate = cierre?.timestamp
-        ? new Date(desdeTimestamp.getTime() + 1000) // 1 segundo después
-        : new Date(desdeTimestamp.getTime())
       const desdeFecha = cierre?.timestamp
         ? new Date(desdeTimestamp).toISOString().split('T')[0]
         : (() => { const next = new Date(desdeTimestamp); next.setDate(next.getDate() + 1); return next.toISOString().split('T')[0] })()
@@ -88,26 +109,29 @@ export default function Caja() {
         getDocs(query(collection(db, 'ingresos_extra'), where('fecha', '>=', desdeFecha), where('fecha', '<=', todayStr()))),
       ])
 
-      const ventas = orders.reduce((s, o) => s + parseFloat(o.total || 0), 0)
-      // Desglose por medio de pago (WC: bacs=banco, cod=efectivo)
-      const ventasBanco = orders.filter(o => o.payment_method === 'bacs' || o.payment_method === 'ppec_paypal').reduce((s, o) => s + parseFloat(o.total || 0), 0)
-      const ventasEfectivo = orders.filter(o => o.payment_method === 'cod').reduce((s, o) => s + parseFloat(o.total || 0), 0)
+      // ── Ventas: usar cobrado real (historial de pagos si existe) ──
+      let ventas = 0, ventasBanco = 0, ventasEfectivo = 0
+      orders.forEach(o => {
+        const cobrado = calcCobrado(o)
+        const medio = getMedioCobro(o)
+        ventas += cobrado
+        if (medio === 'efectivo') ventasEfectivo += cobrado
+        else ventasBanco += cobrado
+      })
 
       let egresosTotal = 0, egresosBanco = 0, egresosEfectivo = 0
       egrSnap.forEach(d => {
         const x = d.data()
-        // Si el egreso es del mismo día del cierre, verificar que su createdAt
-        // sea POSTERIOR al timestamp del cierre para no restarlo dos veces
+        // Si el egreso es del mismo día del cierre, verificar createdAt
         if (cierre?.timestamp && x.fecha === cierre.fecha) {
           const egrCreated = x.createdAt ? new Date(x.createdAt) : null
           const cierreTs = new Date(cierre.timestamp)
-          // Si el egreso no tiene createdAt o fue creado ANTES del cierre, saltear
           if (!egrCreated || egrCreated <= cierreTs) return
         }
         const m = parseFloat(x.monto || 0)
         egresosTotal += m
         if (x.medio_pago === 'efectivo') egresosEfectivo += m
-        else egresosBanco += m  // default banco
+        else egresosBanco += m
       })
 
       let ingExtra = 0
@@ -119,11 +143,11 @@ export default function Caja() {
       })
 
       const saldoActual = saldoCierre + ventas + ingExtra - egresosTotal
-      // Saldo por cuenta: usamos saldo_banco y saldo_efectivo del último cierre si existen
       const saldoCierreBanco = cierre?.saldo_banco != null ? parseFloat(cierre.saldo_banco) : saldoCierre
       const saldoCierreEfectivo = cierre?.saldo_efectivo != null ? parseFloat(cierre.saldo_efectivo) : 0
       const saldoBanco = saldoCierreBanco + ventasBanco + ingExtra - egresosBanco
       const saldoEfectivo = saldoCierreEfectivo + ventasEfectivo - egresosEfectivo
+
       setKpis({ saldoCierre, ventas, ingExtra, egresos: egresosTotal, saldoActual, ordenes: orders.length, ventasBanco, ventasEfectivo, egresosBanco, egresosEfectivo, saldoBanco, saldoEfectivo })
       setExtraDocs(extras)
       setSaldoCalc(saldoActual)
@@ -151,7 +175,6 @@ export default function Caja() {
     const hoy = todayStr()
     const finMes = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
 
-    // Sueldos: recalcular pagado del mes
     const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
     const sueldoSnap = await getDocs(query(collection(db, 'egresos'), where('categoria', '==', 'sueldos'), where('fecha', '>=', inicioMes), where('fecha', '<=', hoy)))
     const pagadoPorComp = {}
@@ -164,11 +187,21 @@ export default function Caja() {
     comps.forEach(c => {
       if (c.estado !== 'activo') return
       const fp = c.fecha_proximo_pago
-      if (!fp || fp < hoy || fp > finMes) return
       const monto = parseFloat(c.monto || 0)
-      const pagado = c.categoria === 'sueldos' ? (pagadoPorComp[c.id] || 0) : parseFloat(c.monto_pagado || 0)
-      const pendiente = Math.max(monto - pagado, 0)
-      if (pendiente > 0) pendientes.push({ nombre: c.nombre, monto: pendiente, categoria: c.categoria, fecha: fp })
+
+      if (c.categoria === 'sueldos') {
+        const pagadoEsteMes = pagadoPorComp[c.id] || 0
+        const pendiente = Math.max(monto - pagadoEsteMes, 0)
+        if (pendiente > 0) {
+          const fechaRef = fp && fp <= finMes ? fp : finMes
+          pendientes.push({ nombre: c.nombre, monto: pendiente, categoria: c.categoria, fecha: fechaRef })
+        }
+      } else {
+        if (!fp || fp < hoy || fp > finMes) return
+        const pagado = parseFloat(c.monto_pagado || 0)
+        const pendiente = Math.max(monto - pagado, 0)
+        if (pendiente > 0) pendientes.push({ nombre: c.nombre, monto: pendiente, categoria: c.categoria, fecha: fp })
+      }
     })
 
     // AGIP
@@ -189,11 +222,11 @@ export default function Caja() {
 
   // ── Cierre ──────────────────────────────────────────────
   const openCierre = () => {
-    setCierreForm({ 
-      saldo: Math.round(saldoCalc), 
-      saldo_banco: Math.round(kpis.saldoBanco), 
-      saldo_efectivo: Math.round(kpis.saldoEfectivo), 
-      fecha: todayStr(), notas: '' 
+    setCierreForm({
+      saldo: Math.round(saldoCalc),
+      saldo_banco: Math.round(kpis.saldoBanco),
+      saldo_efectivo: Math.round(kpis.saldoEfectivo),
+      fecha: todayStr(), notas: ''
     })
     setShowCierre(true)
   }
@@ -201,7 +234,6 @@ export default function Caja() {
   const guardarCierre = async () => {
     const saldo = parseFloat(cierreForm.saldo)
     if (!cierreForm.fecha || isNaN(saldo)) { toast('Completá fecha y saldo', 'error'); return }
-    // No duplicar el mismo día
     const existing = await getDocs(query(collection(db, 'cierres_caja'), where('fecha', '==', cierreForm.fecha)))
     if (!existing.empty) {
       if (!confirm('Ya existe un cierre para esta fecha. ¿Reemplazarlo?')) return
@@ -234,9 +266,8 @@ export default function Caja() {
     if (!extraForm.fecha || isNaN(monto) || monto <= 0) { toast('Completá fecha y monto', 'error'); return }
     const data = { ...extraForm, monto, usuario: user.email, updatedAt: new Date().toISOString() }
     if (editExtra) {
-      const { deleteDoc: del, doc: docRef, setDoc } = await import('firebase/firestore')
-      await import('firebase/firestore').then(({ setDoc, doc }) =>
-        setDoc(doc(db, 'ingresos_extra', editExtra.id), data)
+      await import('firebase/firestore').then(({ setDoc, doc: docFn }) =>
+        setDoc(docFn(db, 'ingresos_extra', editExtra.id), data)
       )
     } else {
       await addDoc(collection(db, 'ingresos_extra'), { ...data, createdAt: new Date().toISOString() })
@@ -554,7 +585,8 @@ export async function migrarCierresSinTimestamp(db, toast) {
     if (!c.timestamp && c.fecha) {
       const [y, m, day] = c.fecha.split('-').map(Number)
       const ts = new Date(y, m - 1, day, 23, 59, 59).toISOString()
-      await updateDoc(doc(db, 'cierres_caja', d.id), { timestamp: ts })
+      const { updateDoc, doc: docFn } = await import('firebase/firestore')
+      await updateDoc(docFn(db, 'cierres_caja', d.id), { timestamp: ts })
       migrados++
     }
   }
