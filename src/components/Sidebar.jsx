@@ -12,10 +12,11 @@ const NAV2 = [
   { to: 'liquidacion', label: 'Liquidación', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
   { to: 'caja', label: 'Caja', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg> },
   { to: 'profit', label: 'Profit', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> },
-  { to: 'presupuesto', label: 'Presupuesto', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> },
   { to: 'reportes', label: 'Reportes', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
   { to: 'config', label: 'Configuración', icon: <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
 ]
+
+const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 
 const navStyle = ({ isActive }) => ({
   display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px',
@@ -27,19 +28,34 @@ const navStyle = ({ isActive }) => ({
 
 export default function Sidebar({ open, onClose }) {
   const { user, logout } = useAuth()
-  const { period, setPeriod } = usePeriod()
+  const { period, setPeriod, customMonth, customYear, setCustomPeriod } = usePeriod()
+  const now = new Date()
+
+  const isMobile = window.innerWidth <= 768
+
+  // Navigate months for custom picker
+  const prevMonth = () => {
+    if (customMonth === 0) setCustomPeriod(11, customYear - 1)
+    else setCustomPeriod(customMonth - 1, customYear)
+  }
+  const nextMonth = () => {
+    const nm = customMonth === 11 ? 0 : customMonth + 1
+    const ny = customMonth === 11 ? customYear + 1 : customYear
+    // Don't go beyond current month
+    if (ny > now.getFullYear() || (ny === now.getFullYear() && nm > now.getMonth())) return
+    setCustomPeriod(nm, ny)
+  }
+  const isCurrentMonth = customMonth === now.getMonth() && customYear === now.getFullYear()
 
   return (
     <>
-      {/* Overlay mobile */}
       {open && <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 250 }} />}
 
       <aside style={{
         width: 220, minWidth: 220, background: 'var(--sidebar-bg)',
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
-        // Mobile: slide in/out
-        position: window.innerWidth <= 768 ? 'fixed' : 'relative',
-        left: window.innerWidth <= 768 ? (open ? 0 : -240) : 0,
+        position: isMobile ? 'fixed' : 'relative',
+        left: isMobile ? (open ? 0 : -240) : 0,
         top: 0, bottom: 0, zIndex: 300,
         transition: 'left .25s ease',
       }}>
@@ -54,22 +70,74 @@ export default function Sidebar({ open, onClose }) {
           </div>
         </div>
 
-        {/* Period */}
+        {/* Period selector */}
         <div style={{ padding: '14px 12px', borderBottom: '1px solid #1f2d40' }}>
           <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
             Período
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {['week', 'month', 'year'].map(p => (
+
+          {/* Quick buttons: Sem / Mes / Año */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+            {[['week','Sem'],['month','Mes'],['year','Año']].map(([p, label]) => (
               <button key={p} onClick={() => setPeriod(p)} style={{
-                flex: 1, padding: '6px 4px', border: `1.5px solid ${period === p ? 'var(--blue)' : '#2d3748'}`,
+                flex: 1, padding: '6px 4px',
+                border: `1.5px solid ${period === p ? 'var(--blue)' : '#2d3748'}`,
                 background: period === p ? 'var(--blue)' : 'transparent',
-                color: period === p ? '#fff' : '#9ca3af', borderRadius: 6,
-                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                color: period === p ? '#fff' : '#9ca3af',
+                borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
               }}>
-                {p === 'week' ? 'Sem' : p === 'month' ? 'Mes' : 'Año'}
+                {label}
               </button>
             ))}
+          </div>
+
+          {/* Month navigator */}
+          <div style={{ background: '#1f2d40', borderRadius: 8, padding: '8px 10px' }}>
+            <div style={{ color: '#6b7280', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>
+              Mes específico
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <button onClick={prevMonth} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: '2px 6px', fontSize: 16, lineHeight: 1 }}>
+                ‹
+              </button>
+              <button
+                onClick={() => setCustomPeriod(customMonth, customYear)}
+                style={{
+                  background: period === 'custom' ? 'var(--blue)' : 'transparent',
+                  border: `1px solid ${period === 'custom' ? 'var(--blue)' : '#374151'}`,
+                  color: period === 'custom' ? '#fff' : '#d1d5db',
+                  borderRadius: 6, padding: '4px 8px', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, transition: 'all .15s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {MONTHS[customMonth]} {customYear}
+              </button>
+              <button
+                onClick={nextMonth}
+                disabled={isCurrentMonth}
+                style={{ background: 'none', border: 'none', color: isCurrentMonth ? '#374151' : '#9ca3af', cursor: isCurrentMonth ? 'default' : 'pointer', padding: '2px 6px', fontSize: 16, lineHeight: 1 }}
+              >
+                ›
+              </button>
+            </div>
+            {/* Quick: mes anterior */}
+            <button
+              onClick={() => {
+                const pm = now.getMonth() === 0 ? 11 : now.getMonth() - 1
+                const py = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+                setCustomPeriod(pm, py)
+              }}
+              style={{
+                width: '100%', marginTop: 6, padding: '5px', background: 'transparent',
+                border: '1px solid #374151', color: '#6b7280', borderRadius: 6,
+                fontSize: 11, cursor: 'pointer', transition: 'all .15s',
+              }}
+              onMouseEnter={e => { e.target.style.borderColor = '#4b5563'; e.target.style.color = '#9ca3af' }}
+              onMouseLeave={e => { e.target.style.borderColor = '#374151'; e.target.style.color = '#6b7280' }}
+            >
+              ← Mes anterior
+            </button>
           </div>
         </div>
 
