@@ -57,12 +57,20 @@ export default function Caja() {
   const loadAll = async () => {
     setLoading(true)
     try {
-      const cierreSnap = await getDocs(query(collection(db,'cierres_caja'), orderBy('timestamp','desc'), limit(1)))
+      // Ordenar por fecha (siempre existe) — timestamp solo para comparación de hora
+      const cierreSnap = await getDocs(query(collection(db,'cierres_caja'), orderBy('fecha','desc'), limit(5)))
       let cierre = null
-      cierreSnap.forEach(d => { cierre = {id:d.id,...d.data()} })
-      if (!cierre) {
-        const fb = await getDocs(query(collection(db,'cierres_caja'), orderBy('fecha','desc'), limit(1)))
-        fb.forEach(d => { cierre = {id:d.id,...d.data()} })
+      // De los últimos 5 por fecha, elegir el que tenga timestamp más reciente
+      const candidatos = []
+      cierreSnap.forEach(d => candidatos.push({id:d.id,...d.data()}))
+      if (candidatos.length > 0) {
+        // Ordenar por timestamp si existe, sino por fecha+hora estimada
+        candidatos.sort((a,b) => {
+          const ta = a.timestamp ? new Date(a.timestamp).getTime() : new Date(a.fecha+'T23:59:59').getTime()
+          const tb = b.timestamp ? new Date(b.timestamp).getTime() : new Date(b.fecha+'T23:59:59').getTime()
+          return tb - ta
+        })
+        cierre = candidatos[0]
       }
       setLastCierre(cierre)
 
