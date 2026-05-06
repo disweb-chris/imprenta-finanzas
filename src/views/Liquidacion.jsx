@@ -8,6 +8,8 @@ import { useAuth } from '../context/AuthContext'
 
 const DEFAULT_PROVEEDORES = ['Proveedor principal', 'Papel y materiales', 'Tinta', 'Sublimación', 'Otros']
 
+const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+
 export default function Liquidacion() {
   const toast = useToast()
   const { user } = useAuth()
@@ -19,8 +21,8 @@ export default function Liquidacion() {
   // Período selector
   const now = new Date()
   const primerDiaMesAnt = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const [periodoStart, setPeriodoStart] = useState(primerDiaMesAnt.toISOString().split('T')[0])
-  const [periodoEnd, setPeriodoEnd] = useState(new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0])
+  const [periodoStart, setPeriodoStart] = useState(_ls(primerDiaMesAnt))
+  const [periodoEnd, setPeriodoEnd] = useState(_ls(new Date(now.getFullYear(), now.getMonth(), 0)))
 
   // Líneas de la liquidación actual
   const [lineas, setLineas] = useState([])

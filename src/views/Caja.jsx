@@ -32,6 +32,8 @@ function getCobrosDelPeriodo(order, desde) {
   return []
 }
 
+const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+
 export default function Caja() {
   const { getCat } = useCats()
   const toast = useToast()
@@ -65,7 +67,7 @@ export default function Caja() {
       setLastCierre(cierre)
 
       const hoy = todayStr()
-      const ayer = new Date(Date.now()-86400000).toISOString().split('T')[0]
+      const ayer = _ls(new Date(Date.now()-86400000))
       if (!cierre) setAlertMsg('No hay cierres registrados. Ingresá el saldo inicial haciendo un cierre de caja.')
       else if (cierre.fecha < ayer) {
         const dias = Math.round((new Date(hoy)-new Date(cierre.fecha))/86400000)
@@ -79,8 +81,8 @@ export default function Caja() {
       else { const [y,m,d]=cierre.fecha.split('-').map(Number); desde=new Date(y,m-1,d,23,59,59,999) }
       const ahora = new Date()
       const desdeFecha = cierre?.timestamp
-        ? new Date(desde).toISOString().split('T')[0]
-        : (()=>{ const n=new Date(desde); n.setDate(n.getDate()+1); return n.toISOString().split('T')[0] })()
+        ? _ls(new Date(desde))
+        : (()=>{ const n=new Date(desde); n.setDate(n.getDate()+1); return _ls(n) })()
 
       const [ordNuevas, ordAntiguas, egrSnap, extraSnap] = await Promise.all([
         fetchOrders(desde, ahora, 'completed,processing').catch(()=>[]),
@@ -149,8 +151,8 @@ export default function Caja() {
 
   const calcProyeccion = async (saldoActual, comps) => {
     const now=new Date(), hoy=todayStr()
-    const finMes=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().split('T')[0]
-    const inicioMes=new Date(now.getFullYear(),now.getMonth(),1).toISOString().split('T')[0]
+    const finMes=_ls(new Date(now.getFullYear(),now.getMonth()+1,0))
+    const inicioMes=_ls(new Date(now.getFullYear(),now.getMonth(),1))
     const ss = await getDocs(query(collection(db,'egresos'),where('categoria','==','sueldos'),where('fecha','>=',inicioMes),where('fecha','<=',hoy)))
     const ppc={}; ss.forEach(d=>{const x=d.data();if(x.origen_compromiso)ppc[x.origen_compromiso]=(ppc[x.origen_compromiso]||0)+parseFloat(x.monto||0)})
     const pendientes=[]
@@ -172,7 +174,7 @@ export default function Caja() {
       const mAF=new Date(now.getFullYear(),now.getMonth(),0,23,59,59)
       const ob=await fetchOrders(mA,mAF,'completed,processing')
       const base=ob.reduce((s,o)=>s+parseFloat(o.total||0),0)
-      if(base>0) pendientes.push({nombre:'AGIP — Ingresos Brutos',monto:base*0.04,categoria:'impuestos',fecha:vA.toISOString().split('T')[0]})
+      if(base>0) pendientes.push({nombre:'AGIP — Ingresos Brutos',monto:base*0.04,categoria:'impuestos',fecha:_ls(vA)})
     }catch{}}
     const total=pendientes.reduce((s,p)=>s+p.monto,0)
     setProyeccion({saldoActual,totalPendiente:total,saldoProyectado:saldoActual-total,pendientes})
@@ -261,7 +263,7 @@ export default function Caja() {
         <div className="chart-card">
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
             <h3>Proyección fin de mes</h3>
-            <span style={{fontSize:12,color:'var(--text-muted)'}}>Proyección al {fmtDate(new Date(new Date().getFullYear(),new Date().getMonth()+1,0).toISOString().split('T')[0])}</span>
+            <span style={{fontSize:12,color:'var(--text-muted)'}}>Proyección al {fmtDate(_ls(new Date(new Date().getFullYear(),new Date().getMonth()+1,0)))}</span>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:16}}>
             <div style={{textAlign:'center',padding:16,background:'#f8fafc',borderRadius:8}}><div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:6}}>Saldo actual</div><div style={{fontFamily:'var(--font-head)',fontSize:20,fontWeight:700}}>{fmt(proyeccion.saldoActual)}</div></div>

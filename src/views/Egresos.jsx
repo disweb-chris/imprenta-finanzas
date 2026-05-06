@@ -7,6 +7,8 @@ import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
+const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+
 export default function Egresos() {
   const { getPeriodDates, periodLabel } = usePeriod()
   const { categorias, getCat } = useCats()
@@ -27,8 +29,8 @@ export default function Egresos() {
   const loadAll = async () => {
     setLoading(true)
     const { start, end } = getPeriodDates()
-    const startStr = start.toISOString().split('T')[0]
-    const endStr = end.toISOString().split('T')[0]
+    const startStr = _ls(start)
+    const endStr = _ls(end)
     let q = query(collection(db, 'egresos'), where('fecha', '>=', startStr), where('fecha', '<=', endStr), orderBy('fecha', 'desc'))
     const snap = await getDocs(q)
     let docs = []

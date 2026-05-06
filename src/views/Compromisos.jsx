@@ -7,6 +7,8 @@ import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
+const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+
 export default function Compromisos() {
   const { getCat } = useCats()
   const toast = useToast()
@@ -39,7 +41,7 @@ export default function Compromisos() {
     const hoy = todayStr()
     // Traer todos los egresos de sueldos del mes — filtrar por período en JS
     const now = new Date()
-    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+    const inicioMes = _ls(new Date(now.getFullYear(), now.getMonth(), 1))
     const snap = await getDocs(query(collection(db, 'egresos'), where('categoria', '==', 'sueldos'), where('fecha', '>=', inicioMes), where('fecha', '<=', hoy)))
 
     // Agrupar todos los egresos por compromiso
@@ -77,7 +79,7 @@ export default function Compromisos() {
         inicioPeriodo = new Date(now.getFullYear(), now.getMonth(), 1)
       }
 
-      const inicioStr = inicioPeriodo.toISOString().split('T')[0]
+      const inicioStr = _ls(inicioPeriodo)
 
       // Sumar pagos del período actual
       const montoPagado = pagos
@@ -116,8 +118,8 @@ export default function Compromisos() {
       const ords = await fetchOrders(mesAnt, mesAntFin, 'completed,processing')
       const base = ords.reduce((s, o) => s + parseFloat(o.total || 0), 0)
       const monto = base * 0.04
-      const days = daysUntil(venc.toISOString().split('T')[0])
-      setAgip({ monto, base, venc: venc.toISOString().split('T')[0], days, mesLabel: mesAnt.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) })
+      const days = daysUntil(_ls(venc))
+      setAgip({ monto, base, venc: _ls(venc), days, mesLabel: mesAnt.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }) })
     } catch {}
   }
 
@@ -163,7 +165,7 @@ export default function Compromisos() {
       // Sueldos: verificar si el total pagado del período cubre el monto completo
       // Recalcular sumando todos los egresos del período actual + este pago
       const now = new Date()
-      const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+      const inicioMes = _ls(new Date(now.getFullYear(), now.getMonth(), 1))
       const hoy = todayStr()
       const snap = await getDocs(
         query(collection(db, 'egresos'),
@@ -203,7 +205,7 @@ export default function Compromisos() {
     if (freq === 'mensual') d.setMonth(d.getMonth() + 1)
     else if (freq === 'anual') d.setFullYear(d.getFullYear() + 1)
     else d.setDate(d.getDate() + 7)
-    return d.toISOString().split('T')[0]
+    return _ls(d)
   }
 
   const activos = compromisos.filter(c => c.estado === 'activo' && c.tipo === 'recurrente')
