@@ -22,7 +22,14 @@ export const fmtDateTime = (s) => {
     ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 }
 
-export const todayStr = () => new Date().toISOString().split('T')[0]
+// Usar hora local en lugar de UTC para evitar que a las 21hs+ cambie al día siguiente
+export const todayStr = () => {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 
 export const daysUntil = (dateStr) => {
   if (!dateStr) return null
