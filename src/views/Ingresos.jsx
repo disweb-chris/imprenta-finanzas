@@ -1,25 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, statusBadge } from '../utils/helpers'
+import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
-
-const COBRO_SALDO_SKU = 'CS'
-const COBRO_SALDO_NOMBRE = 'Cobro Saldo'
-
-function esPedidoCobroSaldo(order) {
-  const items = order.line_items || []
-  return items.length > 0 && items.every(
-    item => item.sku === COBRO_SALDO_SKU || item.name === COBRO_SALDO_NOMBRE
-  )
-}
-
-function getIngresoReal(order) {
-  const historial = order.io_pagos_historial
-  if (Array.isArray(historial) && historial.length > 0) {
-    return historial.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
-  }
-  return parseFloat(order.total || 0)
-}
 
 function getTiposPago(order) {
   const historial = order.io_pagos_historial

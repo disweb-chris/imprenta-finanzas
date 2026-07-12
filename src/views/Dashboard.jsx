@@ -4,27 +4,20 @@ import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, statusBadge } from '../utils/helpers'
+import { fmt, fmtDate, statusBadge, localDateStr } from '../utils/helpers'
+import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 
 Chart.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
-
-const COBRO_SALDO_SKU = 'CS'
-const COBRO_SALDO_NOMBRE = 'Cobro Saldo'
-
-function esPedidoCobroSaldo(order) {
-  const items = order.line_items || []
-  return items.length > 0 && items.every(i => i.sku === COBRO_SALDO_SKU || i.name === COBRO_SALDO_NOMBRE)
-}
 
 export default function Dashboard() {
   const { getPeriodDates, periodLabel } = usePeriod()
   const { getCat } = useCats()
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({
-    ingresos: 0, egresos: 0, balance: 0, compMes: 0, ordenes: 0, compItems: 0,
-    cobrado: 0, pendiente: 0, saldoBanco: 0, saldoEfectivo: 0
+    vendido: 0, egresos: 0, balance: 0, compMes: 0, ordenes: 0, compItems: 0,
+    cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0
   })
   const [senasActivas, setSenasActivas] = useState([])
   const [orders, setOrders] = useState([])
@@ -36,31 +29,35 @@ export default function Dashboard() {
   const loadAll = async () => {
     setLoading(true)
     const { start, end } = getPeriodDates()
-    const startStr = start.toISOString().split('T')[0]
-    const endStr = end.toISOString().split('T')[0]
+    const startStr = localDateStr(start)
+    const endStr = localDateStr(end)
 
-    const [ords, egrSnap, compSnap, cierreSnap] = await Promise.all([
+    const [ords, egrSnap, compSnap, cierreSnap, extraSnap] = await Promise.all([
       fetchOrders(start, end, 'completed,processing,on-hold').catch(() => []),
       getDocs(query(collection(db, 'egresos'), where('fecha', '>=', startStr), where('fecha', '<=', endStr))),
       getDocs(query(collection(db, 'compromisos'), where('estado', '==', 'activo'))),
       getDocs(query(collection(db, 'cierres_caja'), orderBy('timestamp', 'desc'), limit(1))),
+      getDocs(query(collection(db, 'ingresos_extra'), where('fecha', '>=', startStr), where('fecha', '<=', endStr))),
     ])
 
     // Filtrar cobro saldo
     const filtrados = ords.filter(o => !esPedidoCobroSaldo(o))
 
-    // Calcular cobrado y pendiente desde io_pagos_historial
+    // Vendido: valor total de los pedidos del período (independiente de lo cobrado)
+    const vendido = filtrados.reduce((s, o) => s + parseFloat(o.total || 0), 0)
+
+    // Cobrado y pendiente desde io_pagos_historial
     let cobrado = 0
     let pendiente = 0
     const senasArr = []
 
     filtrados.forEach(o => {
       const historial = o.io_pagos_historial || []
-      const montoCobrado = historial.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
+      const montoCobrado = getIngresoReal(o)
       const totalPedido = parseFloat(o.total || 0)
+      cobrado += montoCobrado
 
       if (historial.length > 0) {
-        cobrado += montoCobrado
         const saldo = totalPedido - montoCobrado
         if (saldo > 0) {
           pendiente += saldo
@@ -73,21 +70,17 @@ export default function Dashboard() {
             total: totalPedido,
           })
         }
-      } else {
-        cobrado += totalPedido
       }
     })
 
     setSenasActivas(senasArr)
 
-    const totalIngresos = filtrados.reduce((s, o) => {
-      const h = o.io_pagos_historial || []
-      return s + (h.length > 0 ? h.reduce((a, p) => a + (parseFloat(p.monto) || 0), 0) : parseFloat(o.total || 0))
-    }, 0)
-
     let totalEgresos = 0
     const egrDocs = []
     egrSnap.forEach(d => { const x = d.data(); egrDocs.push(x); totalEgresos += parseFloat(x.monto || 0) })
+
+    let ingresosExtra = 0
+    extraSnap.forEach(d => { ingresosExtra += parseFloat(d.data().monto || 0) })
 
     const now = new Date()
     let compMes = 0, compItems = 0
@@ -109,10 +102,10 @@ export default function Dashboard() {
     })
 
     setKpis({
-      ingresos: totalIngresos, egresos: totalEgresos,
-      balance: totalIngresos - totalEgresos,
+      vendido, egresos: totalEgresos,
+      balance: cobrado + ingresosExtra - totalEgresos,
       compMes, ordenes: filtrados.length, compItems,
-      cobrado, pendiente, saldoBanco, saldoEfectivo
+      cobrado, pendiente, ingresosExtra, saldoBanco, saldoEfectivo
     })
     setOrders(filtrados.slice(0, 8))
 
@@ -134,13 +127,10 @@ export default function Dashboard() {
       months.push(d.toLocaleDateString('es-AR', { month: 'short' }))
       const [mo, es] = await Promise.all([
         fetchOrders(s, e, 'completed,processing').catch(() => []),
-        getDocs(query(collection(db, 'egresos'), where('fecha', '>=', s.toISOString().split('T')[0]), where('fecha', '<=', e.toISOString().split('T')[0])))
+        getDocs(query(collection(db, 'egresos'), where('fecha', '>=', localDateStr(s)), where('fecha', '<=', localDateStr(e))))
       ])
       const mof = mo.filter(o => !esPedidoCobroSaldo(o))
-      ingArr.push(mof.reduce((sum, o) => {
-        const h = o.io_pagos_historial || []
-        return sum + (h.length > 0 ? h.reduce((a, p) => a + (parseFloat(p.monto) || 0), 0) : parseFloat(o.total || 0))
-      }, 0))
+      ingArr.push(mof.reduce((sum, o) => sum + getIngresoReal(o), 0))
       let et = 0; es.forEach(d => et += parseFloat(d.data().monto || 0))
       egrArr.push(et)
     }
@@ -164,39 +154,44 @@ export default function Dashboard() {
     <div className="view">
       <div className="view-header"><h2>Dashboard</h2><p>{periodLabel()}</p></div>
 
-      {/* KPIs principales */}
+      {/* KPIs principales — Vendido / Cobrado / Por cobrar como números separados */}
       <div className="cards-grid">
         <div className="stat-card card-blue">
-          <div className="card-label">Ingresos</div>
-          <div className="card-value">{fmt(kpis.ingresos)}</div>
+          <div className="card-label">Vendido</div>
+          <div className="card-value">{fmt(kpis.vendido)}</div>
           <div className="card-sub">{kpis.ordenes} órdenes</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: '4px solid var(--success)' }}>
+          <div className="card-label">💰 Cobrado</div>
+          <div className="card-value" style={{ color: 'var(--success)' }}>{fmt(kpis.cobrado)}</div>
+          <div className="card-sub">ingresado al período</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <div className="card-label">⏳ Por cobrar</div>
+          <div className="card-value" style={{ color: '#f59e0b' }}>{fmt(kpis.pendiente)}</div>
+          <div className="card-sub">{senasActivas.length} trabajo{senasActivas.length !== 1 ? 's' : ''} con saldo</div>
         </div>
         <div className="stat-card card-red">
           <div className="card-label">Egresos</div>
           <div className="card-value">{fmt(kpis.egresos)}</div>
         </div>
+      </div>
+
+      <div className="cards-grid">
+        <div className="stat-card" style={{ borderLeft: '4px solid #14b8a6' }}>
+          <div className="card-label">➕ Ingresos extra</div>
+          <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.ingresosExtra)}</div>
+          <div className="card-sub">créditos, transferencias, etc.</div>
+        </div>
         <div className="stat-card card-green">
           <div className="card-label">Balance Neto</div>
           <div className="card-value" style={{ color: kpis.balance >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmt(kpis.balance)}</div>
+          <div className="card-sub">cobrado + ingresos extra − egresos</div>
         </div>
         <div className="stat-card card-orange">
           <div className="card-label">Compromisos (mes)</div>
           <div className="card-value">{fmt(kpis.compMes)}</div>
           <div className="card-sub">{kpis.compItems} vencen este mes</div>
-        </div>
-      </div>
-
-      {/* Fila cobros + caja */}
-      <div className="cards-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginTop: 0 }}>
-        <div className="stat-card" style={{ borderLeft: '4px solid var(--success)' }}>
-          <div className="card-label">💰 Cobrado</div>
-          <div className="card-value" style={{ color: 'var(--success)', fontSize: 20 }}>{fmt(kpis.cobrado)}</div>
-          <div className="card-sub">ingresado al período</div>
-        </div>
-        <div className="stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <div className="card-label">⏳ Por cobrar</div>
-          <div className="card-value" style={{ color: '#f59e0b', fontSize: 20 }}>{fmt(kpis.pendiente)}</div>
-          <div className="card-sub">{senasActivas.length} trabajo{senasActivas.length !== 1 ? 's' : ''} con saldo</div>
         </div>
         <div className="stat-card" style={{ borderLeft: '4px solid #2e509e' }}>
           <div className="card-label">🏦 Banco</div>

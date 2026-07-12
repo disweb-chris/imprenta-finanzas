@@ -1,29 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt } from '../utils/helpers'
+import { COBRO_SALDO_SKU, COBRO_SALDO_NOMBRE, esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
-
-// SKU del producto que se usa solo para cobrar saldo — se excluye del cálculo de profit
-const COBRO_SALDO_SKU = 'CS'
-const COBRO_SALDO_NOMBRE = 'Cobro Saldo'
-
-function esPedidoCobroSaldo(order) {
-  const items = order.line_items || []
-  return items.length > 0 && items.every(
-    item => item.sku === COBRO_SALDO_SKU || item.name === COBRO_SALDO_NOMBRE
-  )
-}
-
-function getIngresoReal(order) {
-  // Si el pedido tiene historial de pagos del metabox, usamos la suma de esos montos
-  // como ingreso real del período (evita distorsión por señas/descuentos)
-  const historial = order.io_pagos_historial
-  if (Array.isArray(historial) && historial.length > 0) {
-    return historial.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
-  }
-  // Sin historial: usamos el total del pedido normalmente
-  return parseFloat(order.total || 0)
-}
 
 export default function Profit() {
   const { getPeriodDates, periodLabel } = usePeriod()

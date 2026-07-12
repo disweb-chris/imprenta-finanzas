@@ -1,8 +1,8 @@
-// WooCommerce credentials stored in localStorage only
+// Credenciales de WooCommerce — solo desde localStorage (configurables en Configuración)
 const getWC = () => ({
-  url: localStorage.getItem('wc_url') || 'https://imprentaonline.ar',
-  key: localStorage.getItem('wc_key') || 'ck_742b18523bd4381b2b1cf2459bf00f2ebbfa6c4f',
-  secret: localStorage.getItem('wc_secret') || 'cs_36d3e9b5a7e5d508cba002746359f465b95dee75',
+  url: localStorage.getItem('wc_url') || '',
+  key: localStorage.getItem('wc_key') || '',
+  secret: localStorage.getItem('wc_secret') || '',
 })
 
 const wcAuth = () => {
@@ -11,7 +11,10 @@ const wcAuth = () => {
 }
 
 export const wcFetch = async (endpoint) => {
-  const { url } = getWC()
+  const { url, key, secret } = getWC()
+  if (!url || !key || !secret) {
+    throw new Error('Configurá la conexión a WooCommerce en Configuración antes de continuar')
+  }
   const r = await fetch(`${url}/wp-json/wc/v3${endpoint}`, {
     headers: { Authorization: wcAuth() }
   })
