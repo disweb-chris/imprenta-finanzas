@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs, updateDoc, doc } from 'firebase/firestore'
+import { collection, getDocs, updateDoc, setDoc, deleteDoc, doc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { saveWCConfig, getWCConfig, wcFetch } from '../utils/woocommerce'
-import { DEFAULT_CATS } from '../utils/helpers'
+import { getAppConfig, saveAppConfig } from '../utils/appConfig'
+import { DEFAULT_CATS, fmt } from '../utils/helpers'
+
+const mesActual = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
 export default function Config() {
   const { categorias, addCat, deleteCat, isDefault } = useCats()
@@ -15,6 +18,46 @@ export default function Config() {
   const [catForm, setCatForm] = useState({ nombre: '', color: '#2e509e' })
   const [showCatModal, setShowCatModal] = useState(false)
   const [migrando, setMigrando] = useState(false)
+
+  const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '' })
+  const [mpReales, setMpReales] = useState([])
+  const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
+
+  useEffect(() => {
+    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo }))
+    loadMpReales()
+  }, [])
+
+  const loadMpReales = async () => {
+    const snap = await getDocs(collection(db, 'comisiones_mp_reales'))
+    const rows = []
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }))
+    rows.sort((a, b) => b.id.localeCompare(a.id))
+    setMpReales(rows)
+  }
+
+  const saveParams = async () => {
+    await saveAppConfig({
+      mp_comision_pct: parseFloat(paramsForm.mp_comision_pct) || 0,
+      monotributo_techo: parseFloat(paramsForm.monotributo_techo) || 0,
+    })
+    toast('Parámetros guardados', 'success')
+  }
+
+  const guardarMp = async () => {
+    if (!mpForm.mes || !mpForm.monto) { toast('Completá mes y monto', 'error'); return }
+    await setDoc(doc(db, 'comisiones_mp_reales', mpForm.mes), { monto: parseFloat(mpForm.monto), updatedAt: new Date().toISOString() })
+    setMpForm({ mes: mesActual(), monto: '' })
+    toast('Comisión real guardada', 'success')
+    loadMpReales()
+  }
+
+  const eliminarMp = async (mes) => {
+    if (!confirm('¿Eliminar este monto real?')) return
+    await deleteDoc(doc(db, 'comisiones_mp_reales', mes))
+    toast('Eliminado')
+    loadMpReales()
+  }
 
   const migrarCierres = async () => {
     setMigrando(true)
@@ -92,6 +135,51 @@ export default function Config() {
             </div>
             {testResult && <p style={{ marginTop: 10, fontSize: 12, color: testResult.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>{testResult}</p>}
           </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+        {/* Parámetros financieros */}
+        <div className="table-card">
+          <div className="table-card-header"><h3>Parámetros financieros</h3></div>
+          <div style={{ padding: 20 }}>
+            <div className="field">
+              <label>Comisión MercadoPago estimada (%)</label>
+              <input type="number" step="0.1" value={paramsForm.mp_comision_pct}
+                onChange={e => setParamsForm(f => ({ ...f, mp_comision_pct: e.target.value }))} placeholder="5.5" />
+            </div>
+            <div className="field">
+              <label>Techo de facturación monotributo ($ / 12 meses)</label>
+              <input type="number" value={paramsForm.monotributo_techo}
+                onChange={e => setParamsForm(f => ({ ...f, monotributo_techo: e.target.value }))} placeholder="Ej: 68000000" />
+            </div>
+            <button className="btn btn-primary" onClick={saveParams}>Guardar parámetros</button>
+          </div>
+        </div>
+
+        {/* Comisiones MercadoPago reales */}
+        <div className="table-card">
+          <div className="table-card-header"><h3>Comisión MP — montos reales por mes</h3></div>
+          <div style={{ padding: '16px 20px 4px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Cargá el monto real del resumen de MercadoPago para reemplazar la estimación de ese mes en Dashboard y Reportes.
+            </p>
+            <div className="field-row">
+              <div className="field"><label>Mes</label><input type="month" value={mpForm.mes} onChange={e => setMpForm(f => ({ ...f, mes: e.target.value }))} /></div>
+              <div className="field"><label>Monto real ($)</label><input type="number" value={mpForm.monto} onChange={e => setMpForm(f => ({ ...f, monto: e.target.value }))} placeholder="0" /></div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={guardarMp} style={{ marginBottom: 12 }}>+ Guardar mes</button>
+          </div>
+          {mpReales.length === 0
+            ? <div className="empty-state"><p>Sin montos reales cargados</p></div>
+            : mpReales.map(r => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderTop: '1px solid var(--border)' }}>
+                <span style={{ flex: 1, fontSize: 13 }}>{r.id}</span>
+                <strong style={{ fontSize: 13 }}>{fmt(r.monto)}</strong>
+                <button className="btn btn-danger btn-sm" onClick={() => eliminarMp(r.id)}>×</button>
+              </div>
+            ))
+          }
         </div>
       </div>
 

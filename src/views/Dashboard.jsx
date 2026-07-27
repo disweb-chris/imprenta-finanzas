@@ -5,7 +5,8 @@ import { Chart, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Leg
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, statusBadge, localDateStr } from '../utils/helpers'
-import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
+import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils/pedidos'
+import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 
@@ -19,6 +20,7 @@ export default function Dashboard() {
     vendido: 0, egresos: 0, balance: 0, compMes: 0, ordenes: 0, compItems: 0,
     cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0
   })
+  const [comisionMP, setComisionMP] = useState({ total: 0, tieneReal: false })
   const [senasActivas, setSenasActivas] = useState([])
   const [orders, setOrders] = useState([])
   const [overviewData, setOverviewData] = useState(null)
@@ -32,16 +34,24 @@ export default function Dashboard() {
     const startStr = localDateStr(start)
     const endStr = localDateStr(end)
 
-    const [ords, egrSnap, compSnap, cierreSnap, extraSnap] = await Promise.all([
+    const [ords, egrSnap, compSnap, cierreSnap, extraSnap, appCfg, mpRealesSnap] = await Promise.all([
       fetchOrders(start, end, 'completed,processing,on-hold').catch(() => []),
       getDocs(query(collection(db, 'egresos'), where('fecha', '>=', startStr), where('fecha', '<=', endStr))),
       getDocs(query(collection(db, 'compromisos'), where('estado', '==', 'activo'))),
       getDocs(query(collection(db, 'cierres_caja'), orderBy('timestamp', 'desc'), limit(1))),
       getDocs(query(collection(db, 'ingresos_extra'), where('fecha', '>=', startStr), where('fecha', '<=', endStr))),
+      getAppConfig(),
+      getDocs(collection(db, 'comisiones_mp_reales')),
     ])
 
     // Filtrar cobro saldo
     const filtrados = ords.filter(o => !esPedidoCobroSaldo(o))
+
+    // Comisión MercadoPago estimada — reemplazada por el monto real cuando está cargado
+    const realesPorMes = {}
+    mpRealesSnap.forEach(d => { realesPorMes[d.id] = parseFloat(d.data().monto || 0) })
+    const comisionMPCalc = calcularComisionMP(filtrados, appCfg.mp_comision_pct, realesPorMes)
+    setComisionMP({ total: comisionMPCalc.total, tieneReal: comisionMPCalc.detalle.some(x => x.real != null) })
 
     // Vendido: valor total de los pedidos del período (independiente de lo cobrado)
     const vendido = filtrados.reduce((s, o) => s + parseFloat(o.total || 0), 0)
@@ -202,6 +212,11 @@ export default function Dashboard() {
           <div className="card-label">💵 Efectivo</div>
           <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.saldoEfectivo)}</div>
           <div className="card-sub">último cierre</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #009ee3' }}>
+          <div className="card-label">💳 Comisión MP {comisionMP.tieneReal ? '' : 'estimada'}</div>
+          <div className="card-value" style={{ fontSize: 20 }}>{fmt(comisionMP.total)}</div>
+          <div className="card-sub">{comisionMP.tieneReal ? 'incluye monto real cargado' : 'no registrada como egreso'}</div>
         </div>
       </div>
 

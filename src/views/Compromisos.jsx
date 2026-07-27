@@ -3,6 +3,8 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, o
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, todayStr, daysUntil } from '../utils/helpers'
+import { esPedidoCobroSaldo } from '../utils/pedidos'
+import { getAppConfig } from '../utils/appConfig'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
@@ -15,6 +17,7 @@ export default function Compromisos() {
   const { user } = useAuth()
   const [compromisos, setCompromisos] = useState([])
   const [agip, setAgip] = useState(null)
+  const [monotributo, setMonotributo] = useState(null)
   const [tab, setTab] = useState('activos')
   const [showModal, setShowModal] = useState(false)
   const [showPagar, setShowPagar] = useState(false)
@@ -36,6 +39,20 @@ export default function Compromisos() {
     setCompromisos(comps)
     calcKpis(comps)
     calcAGIP()
+    calcMonotributo()
+  }
+
+  const calcMonotributo = async () => {
+    try {
+      const cfg = await getAppConfig()
+      const techo = parseFloat(cfg.monotributo_techo || 0)
+      if (!techo) { setMonotributo(null); return }
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth() - 11, 1) // 12 meses móviles, incluye el actual
+      const ords = await fetchOrders(start, now, 'completed,processing')
+      const facturado = ords.filter(o => !esPedidoCobroSaldo(o)).reduce((s, o) => s + parseFloat(o.total || 0), 0)
+      setMonotributo({ facturado, techo, pct: facturado / techo * 100 })
+    } catch { setMonotributo(null) }
   }
 
   const recalcSueldos = async (comps) => {
@@ -340,6 +357,28 @@ export default function Compromisos() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Monotributo card */}
+      {monotributo && (
+        <div style={{ background: 'linear-gradient(135deg,#4c1d95,#7c3aed)', borderRadius: 12, padding: '18px 20px', marginBottom: 16, color: '#fff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 15 }}>Monotributo — facturación 12 meses móviles</div>
+              <div style={{ fontSize: 12, opacity: .75 }}>Techo de categoría: {fmt(monotributo.techo)}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontFamily: 'var(--font-head)', fontSize: 24, fontWeight: 800 }}>{fmt(monotributo.facturado)}</div>
+              <div style={{ fontSize: 12, opacity: .85, marginTop: 2 }}>{monotributo.pct.toFixed(1)}% del techo</div>
+            </div>
+          </div>
+          <div style={{ height: 8, background: 'rgba(255,255,255,.2)', borderRadius: 4, overflow: 'hidden', marginTop: 12 }}>
+            <div style={{ height: '100%', borderRadius: 4, background: monotributo.pct >= 100 ? '#ef4444' : monotributo.pct >= 80 ? '#f59e0b' : '#fff', width: `${Math.min(monotributo.pct, 100)}%`, transition: 'width .3s' }} />
+          </div>
+        </div>
+      )}
+      {monotributo && monotributo.pct >= 80 && (
+        <div className="alert-warning">⚠️ Facturación de los últimos 12 meses al {monotributo.pct.toFixed(0)}% del techo de tu categoría de monotributo — evaluá recategorizarte.</div>
       )}
 
       <div className="tabs">
