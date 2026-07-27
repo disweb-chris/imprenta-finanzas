@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { fmt } from '../utils/helpers'
+import { fmt, localDateStr } from '../utils/helpers'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { usePeriod } from '../context/PeriodContext'
 
 export default function Presupuesto() {
-  const { getCat } = useCats()
+  const { getCat, categorias } = useCats()
   const toast = useToast()
   const { getPeriodDates, periodLabel } = usePeriod()
 
@@ -23,8 +23,8 @@ export default function Presupuesto() {
   const load = async () => {
     setLoading(true)
     const { start, end } = getPeriodDates()
-    const startStr = start.toISOString().split('T')[0]
-    const endStr = end.toISOString().split('T')[0]
+    const startStr = localDateStr(start)
+    const endStr = localDateStr(end)
 
     const [presSnap, egrSnap] = await Promise.all([
       getDocs(query(collection(db, 'presupuestos'), orderBy('categoria'))),
@@ -233,8 +233,8 @@ export default function Presupuesto() {
                 <label style={S.label}>Categoría</label>
                 <select style={S.input} value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}>
                   <option value="">Elegir categoría...</option>
-                  {['alquiler','insumos','credito','sueldos','marketing','impuestos','maquinaria','suscripciones','varios'].map(c => (
-                    <option key={c} value={c}>{getCat(c)?.nombre || c}</option>
+                  {categorias.map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre}</option>
                   ))}
                 </select>
               </div>

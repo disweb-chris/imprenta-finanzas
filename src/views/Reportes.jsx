@@ -4,7 +4,8 @@ import { Line } from 'react-chartjs-2'
 import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt } from '../utils/helpers'
+import { fmt, localDateStr } from '../utils/helpers'
+import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 
@@ -24,16 +25,17 @@ export default function Reportes() {
   const loadAll = async () => {
     setLoading(true)
     const { start, end } = getPeriodDates()
-    const startStr = start.toISOString().split('T')[0]
-    const endStr = end.toISOString().split('T')[0]
+    const startStr = localDateStr(start)
+    const endStr = localDateStr(end)
 
-    const [orders, egrSnap, compSnap] = await Promise.all([
+    const [ordersRaw, egrSnap, compSnap] = await Promise.all([
       fetchOrders(start, end, 'completed,processing').catch(() => []),
       getDocs(query(collection(db, 'egresos'), where('fecha', '>=', startStr), where('fecha', '<=', endStr))),
       getDocs(query(collection(db, 'compromisos'), where('estado', '==', 'activo'))),
     ])
 
-    const totalIngresos = orders.reduce((s, o) => s + parseFloat(o.total || 0), 0)
+    const orders = ordersRaw.filter(o => !esPedidoCobroSaldo(o))
+    const totalIngresos = orders.reduce((s, o) => s + getIngresoReal(o), 0)
     let totalEgresos = 0
     const catTotals = {}
     egrSnap.forEach(d => {
@@ -63,9 +65,9 @@ export default function Reportes() {
       months.push(d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' }))
       const [mo, es] = await Promise.all([
         fetchOrders(s, e, 'completed,processing').catch(() => []),
-        getDocs(query(collection(db, 'egresos'), where('fecha', '>=', s.toISOString().split('T')[0]), where('fecha', '<=', e.toISOString().split('T')[0])))
+        getDocs(query(collection(db, 'egresos'), where('fecha', '>=', localDateStr(s)), where('fecha', '<=', localDateStr(e))))
       ])
-      ingArr.push(mo.reduce((sum, o) => sum + parseFloat(o.total || 0), 0))
+      ingArr.push(mo.filter(o => !esPedidoCobroSaldo(o)).reduce((sum, o) => sum + getIngresoReal(o), 0))
       let et = 0; es.forEach(d => et += parseFloat(d.data().monto || 0))
       egrArr.push(et)
     }

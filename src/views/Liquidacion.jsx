@@ -24,6 +24,11 @@ export default function Liquidacion() {
   const [periodoStart, setPeriodoStart] = useState(_ls(primerDiaMesAnt))
   const [periodoEnd, setPeriodoEnd] = useState(_ls(new Date(now.getFullYear(), now.getMonth(), 0)))
 
+  // Mes de imputación contable — puede diferir del período de pedidos usado para calcular costos
+  const [mesImputacion, setMesImputacion] = useState(
+    `${primerDiaMesAnt.getFullYear()}-${String(primerDiaMesAnt.getMonth() + 1).padStart(2, '0')}`
+  )
+
   // Líneas de la liquidación actual
   const [lineas, setLineas] = useState([])
   const [calculando, setCalculando] = useState(false)
@@ -64,13 +69,15 @@ export default function Liquidacion() {
       const end = new Date(periodoEnd + 'T23:59:59')
       const orders = await fetchOrders(start, end, 'completed,processing')
 
-      // Agrupar costos por producto
+      // Agrupar costos por pedido + producto — permite ajustar el costo pedido por pedido,
+      // no solo un total agregado por producto en todo el período
       const productMap = {}
       for (const order of orders) {
         for (const item of (order.line_items || [])) {
-          const key = item.variation_id
+          const prodKey = item.variation_id
             ? `v${item.variation_id}`
             : `p${item.product_id}`
+          const key = `o${order.id}_${prodKey}`
           const costMeta = (item.meta_data || []).find(
             m => m.key === 'yith_cog_item_cost' || m.key === '_yith_cog_item_cost'
           )
@@ -81,6 +88,8 @@ export default function Liquidacion() {
           if (!productMap[key]) {
             productMap[key] = {
               key,
+              pedido_id: order.id,
+              pedido_numero: order.number,
               nombre: item.name,
               cantidad: 0,
               costo_calculado: 0,
@@ -92,13 +101,13 @@ export default function Liquidacion() {
         }
       }
 
-      // Convertir a líneas editables — solo productos con costo > 0
+      // Convertir a líneas editables — solo líneas con costo > 0
       const nuevasLineas = Object.values(productMap)
         .filter(p => p.costo_calculado > 0)
         .sort((a, b) => b.costo_calculado - a.costo_calculado)
         .map(p => ({
           ...p,
-          costo_ajustado: p.costo_calculado, // editable
+          costo_ajustado: p.costo_calculado, // editable por pedido
           proveedor: proveedores[0],
           medio_pago: 'banco',
           incluir: true,
@@ -127,6 +136,8 @@ export default function Liquidacion() {
   const addLinea = () => {
     setLineas(prev => [...prev, {
       key: `manual_${Date.now()}`,
+      pedido_id: null,
+      pedido_numero: null,
       nombre: '',
       cantidad: 1,
       costo_calculado: 0,
@@ -163,11 +174,13 @@ export default function Liquidacion() {
         const ref = await addDoc(collection(db, 'egresos'), {
           fecha,
           monto,
-          categoria: 'insumos',
+          categoria: 'produccion-tercerizada',
           subcategoria: l.proveedor,
-          descripcion: `Costo producción: ${l.nombre}${l.manual ? ' (manual)' : ''}`,
+          descripcion: `Costo producción: ${l.nombre}${l.pedido_numero ? ` (pedido #${l.pedido_numero})` : ''}${l.manual ? ' (manual)' : ''}`,
           medio_pago: l.medio_pago,
+          mes_imputacion: mesImputacion,
           origen_liquidacion: true,
+          origen_pedido: l.pedido_id || null,
           usuario: user.email,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -180,9 +193,12 @@ export default function Liquidacion() {
         fecha,
         periodo_start: periodoStart,
         periodo_end: periodoEnd,
+        mes_imputacion: mesImputacion,
         total_calculado: totalCalculado,
         total_ajustado: totalAjustado,
         lineas: lineasActivas.map(l => ({
+          pedido_id: l.pedido_id || null,
+          pedido_numero: l.pedido_numero || null,
           nombre: l.nombre,
           cantidad: l.cantidad,
           costo_calculado: parseFloat(l.costo_calculado || 0),
@@ -246,6 +262,10 @@ export default function Liquidacion() {
             <label>Hasta</label>
             <input type="date" value={periodoEnd} onChange={e => { setPeriodoEnd(e.target.value); setCalculado(false) }} />
           </div>
+          <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 140 }}>
+            <label>Mes de imputación</label>
+            <input type="month" value={mesImputacion} onChange={e => setMesImputacion(e.target.value)} />
+          </div>
           <button className="btn btn-primary" onClick={calcular} disabled={calculando} style={{ marginBottom: 0 }}>
             {calculando
               ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Calculando...</>
@@ -272,6 +292,7 @@ export default function Liquidacion() {
               <thead>
                 <tr>
                   <th style={{ width: 36 }}>✓</th>
+                  <th>Pedido</th>
                   <th>Producto / Concepto</th>
                   <th className="text-right">Cant.</th>
                   <th className="text-right">Costo YITH</th>
@@ -288,6 +309,9 @@ export default function Liquidacion() {
                       <input type="checkbox" checked={l.incluir}
                         onChange={e => updateLinea(i, 'incluir', e.target.checked)}
                         style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {l.pedido_numero ? `#${l.pedido_numero}` : '-'}
                     </td>
                     <td>
                       {l.manual
@@ -400,6 +424,7 @@ export default function Liquidacion() {
                   <tr>
                     <th>Fecha pago</th>
                     <th>Período</th>
+                    <th>Mes imputado</th>
                     <th className="text-right">Costo YITH</th>
                     <th className="text-right">Total pagado</th>
                     <th className="text-right">Diferencia</th>
@@ -416,6 +441,7 @@ export default function Liquidacion() {
                         <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {fmtDate(h.periodo_start)} — {fmtDate(h.periodo_end)}
                         </td>
+                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{h.mes_imputacion || '-'}</td>
                         <td className="text-right" style={{ color: 'var(--text-muted)' }}>{fmt(h.total_calculado)}</td>
                         <td className="text-right" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--blue)' }}>{fmt(h.total_ajustado)}</td>
                         <td className="text-right" style={{ fontWeight: 600, color: dif > 0 ? 'var(--danger)' : dif < 0 ? 'var(--success)' : 'var(--text-muted)' }}>
@@ -447,12 +473,14 @@ export default function Liquidacion() {
             </div>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
               Período: {fmtDate(showDetalle.periodo_start)} — {fmtDate(showDetalle.periodo_end)}
+              {showDetalle.mes_imputacion && <> · Mes imputado: <strong>{showDetalle.mes_imputacion}</strong></>}
             </p>
             <table>
-              <thead><tr><th>Producto</th><th className="text-right">Cant.</th><th className="text-right">YITH</th><th className="text-right">Pagado</th><th>Proveedor</th><th>Medio</th></tr></thead>
+              <thead><tr><th>Pedido</th><th>Producto</th><th className="text-right">Cant.</th><th className="text-right">YITH</th><th className="text-right">Pagado</th><th>Proveedor</th><th>Medio</th></tr></thead>
               <tbody>
                 {(showDetalle.lineas || []).map((l, i) => (
                   <tr key={i}>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{l.pedido_numero ? `#${l.pedido_numero}` : '-'}</td>
                     <td style={{ fontSize: 12 }}>{l.nombre}</td>
                     <td className="text-right" style={{ fontSize: 12 }}>{l.cantidad}</td>
                     <td className="text-right" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(l.costo_calculado)}</td>

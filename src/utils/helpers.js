@@ -22,14 +22,16 @@ export const fmtDateTime = (s) => {
     ' ' + d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 }
 
-// Usar hora local en lugar de UTC para evitar que a las 21hs+ cambie al día siguiente
-export const todayStr = () => {
-  const d = new Date()
+// Formatea un Date como YYYY-MM-DD en hora local (evita el shift de toISOString, que usa UTC)
+export const localDateStr = (d) => {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
+
+// Usar hora local en lugar de UTC para evitar que a las 21hs+ cambie al día siguiente
+export const todayStr = () => localDateStr(new Date())
 
 export const daysUntil = (dateStr) => {
   if (!dateStr) return null
@@ -41,8 +43,9 @@ export const daysUntil = (dateStr) => {
 }
 
 export const DEFAULT_CATS = [
-  { id: 'alquiler',      nombre: 'Alquiler',       color: '#6366f1' },
-  { id: 'insumos',       nombre: 'Insumos',         color: '#0ea5e9' },
+  { id: 'alquiler',              nombre: 'Alquiler',                color: '#6366f1' },
+  { id: 'insumos',               nombre: 'Insumos',                  color: '#0ea5e9' },
+  { id: 'produccion-tercerizada', nombre: 'Producción tercerizada',  color: '#0891b2' },
   { id: 'credito',       nombre: 'Crédito',         color: '#f59e0b' },
   { id: 'sueldos',       nombre: 'Sueldos',         color: '#10b981' },
   { id: 'marketing',     nombre: 'Marketing',       color: '#FF6B00' },
