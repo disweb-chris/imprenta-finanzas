@@ -18,3 +18,28 @@ export function getIngresoReal(order) {
   }
   return parseFloat(order.total || 0)
 }
+
+export function esPedidoMercadoPago(order) {
+  const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
+  return pm.includes('mercadopago') || pm.includes('mercado pago') || pm.includes('mercado_pago')
+}
+
+// Estima la comisión de MercadoPago agrupando por mes calendario del pedido, y reemplaza
+// la estimación por el monto real cargado a mano cuando está disponible para ese mes.
+export function calcularComisionMP(orders, tasaPct, realesPorMes = {}) {
+  const porMes = {}
+  orders.forEach(o => {
+    if (!esPedidoMercadoPago(o)) return
+    const mes = String(o.date_created || '').slice(0, 7) // YYYY-MM
+    if (!mes) return
+    porMes[mes] = (porMes[mes] || 0) + getIngresoReal(o) * (tasaPct / 100)
+  })
+  let total = 0
+  const detalle = Object.entries(porMes).map(([mes, estimado]) => {
+    const real = realesPorMes[mes]
+    const monto = real != null ? real : estimado
+    total += monto
+    return { mes, estimado, real: real != null ? real : null, monto }
+  })
+  return { total, detalle }
+}

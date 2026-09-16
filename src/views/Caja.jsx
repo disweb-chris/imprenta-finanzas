@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, getDocs, addDoc, deleteDoc, doc, query, orderBy, limit, where } from 'firebase/firestore'
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy, limit, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, todayStr } from '../utils/helpers'
@@ -196,7 +196,25 @@ export default function Caja() {
     const ex=await getDocs(query(collection(db,'cierres_caja'),where('fecha','==',cierreForm.fecha)))
     if(!ex.empty){if(!confirm('Ya existe un cierre para esta fecha. ¿Reemplazarlo?')) return; for(const d of ex.docs) await deleteDoc(doc(db,'cierres_caja',d.id))}
     await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,notas:cierreForm.notas,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
+    await guardarSnapshotDeuda(cierreForm.fecha)
     setShowCierre(false);toast('Cierre guardado','success');loadAll()
+  }
+
+  // Snapshot mensual de la deuda total en créditos/cuotas activos — se sobreescribe el snapshot
+  // del mes en cada cierre, así siempre refleja el último estado conocido de ese mes
+  const guardarSnapshotDeuda=async(fecha)=>{
+    const snap=await getDocs(collection(db,'compromisos'))
+    let deudaTotal=0, cantidad=0
+    snap.forEach(d=>{
+      const c=d.data()
+      if(c.tipo!=='cuotas'||c.estado==='finalizado') return
+      const restantes=Math.max((c.total_cuotas||0)-(c.cuotas_pagadas||0),0)
+      if(restantes<=0) return
+      deudaTotal+=restantes*parseFloat(c.monto||0)
+      cantidad++
+    })
+    const mes=fecha.slice(0,7)
+    await setDoc(doc(db,'deuda_historial',mes),{mes,fecha,deuda_total:deudaTotal,cantidad_compromisos:cantidad,updatedAt:new Date().toISOString()})
   }
 
   const guardarExtra=async()=>{
