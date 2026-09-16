@@ -48,3 +48,10 @@ export const saveWCConfig = (url, key, secret) => {
 }
 
 export const getWCConfig = getWC
+
+// Busca clientes registrados de WooCommerce por nombre, usuario o email
+export const searchCustomers = async (search) => {
+  const q = (search || '').trim()
+  if (q.length < 2) return []
+  return wcFetch(`/customers?search=${encodeURIComponent(q)}&per_page=10`)
+}
