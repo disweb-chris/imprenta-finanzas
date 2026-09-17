@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { collection, addDoc } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { searchCustomers } from '../utils/woocommerce'
+import { searchCustomers, saveWCConfig, getWCConfig } from '../utils/woocommerce'
 import { fmt, todayStr } from '../utils/helpers'
 import { calcularPresupuesto, PROD_MODES } from '../utils/calculadoraPliegos'
 import { useToast } from '../components/Toast'
@@ -53,6 +53,16 @@ export default function Calculadora() {
   const [clienteResults, setClienteResults] = useState([])
   const [buscandoCliente, setBuscandoCliente] = useState(false)
   const [guardando, setGuardando] = useState(false)
+
+  const [wcForm, setWcForm] = useState(() => getWCConfig())
+  const [showWcConfig, setShowWcConfig] = useState(() => !getWCConfig().url)
+  const [wcTestResult, setWcTestResult] = useState('')
+
+  const guardarWc = () => {
+    saveWCConfig(wcForm.url.replace(/\/$/, ''), wcForm.key, wcForm.secret)
+    setWcTestResult('✓ Guardado en este navegador')
+    toast('Conexión guardada en este navegador', 'success')
+  }
 
   // Cálculo derivado directo del render — no useEffect, es una transformación pura de `form`
   let resultado = null
@@ -194,8 +204,26 @@ export default function Calculadora() {
           <h2>Calculadora de Pliegos</h2>
           <p>Imposición, costos y precio final — con IIBB y ajuste manual</p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={resetForm}>Reset</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowWcConfig(s => !s)}>⚙ Conexión WooCommerce</button>
+          <button className="btn btn-secondary btn-sm" onClick={resetForm}>Reset</button>
+        </div>
       </div>
+
+      {showWcConfig && (
+        <div style={{ background: '#fff', borderRadius: 10, padding: '16px 24px', boxShadow: 'var(--shadow)', marginBottom: 20 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Necesaria para buscar clientes al guardar una cotización. Se guarda solo en este navegador — hay que cargarla una vez por dispositivo.
+          </p>
+          <div className="field-row">
+            <div className="field"><label>URL del sitio</label><input value={wcForm.url} onChange={e => setWcForm(f => ({ ...f, url: e.target.value }))} placeholder="https://imprentaonline.ar" /></div>
+            <div className="field"><label>Consumer Key</label><input value={wcForm.key} onChange={e => setWcForm(f => ({ ...f, key: e.target.value }))} placeholder="ck_..." /></div>
+          </div>
+          <div className="field"><label>Consumer Secret</label><input type="password" value={wcForm.secret} onChange={e => setWcForm(f => ({ ...f, secret: e.target.value }))} placeholder="cs_..." /></div>
+          <button className="btn btn-primary btn-sm" onClick={guardarWc}>Guardar conexión</button>
+          {wcTestResult && <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--success)' }}>{wcTestResult}</span>}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px,1fr))', gap: 20, alignItems: 'start' }}>
         {/* Columna de inputs */}
