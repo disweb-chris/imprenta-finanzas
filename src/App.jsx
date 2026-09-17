@@ -34,12 +34,32 @@ const Loader = () => (
 )
 
 export default function App() {
-  const { user } = useAuth()
+  const { user, role, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = window.location.pathname
 
-  if (user === undefined) return <Loader />
+  if (user === undefined || role === undefined) return <Loader />
   if (!user) return <Login />
+
+  // Rol restringido: solo la calculadora, sin sidebar ni acceso a ninguna otra pantalla
+  if (role === 'gestor') {
+    return (
+      <div className="app-layout" style={{ display: 'block' }}>
+        <div className="mobile-header" style={{ display: 'flex' }}>
+          <img src="https://imprentaonline.ar/wp-content/uploads/2026/02/logo-blanco.webp" alt="IO" style={{ height: 26 }} />
+          <span style={{ flex: 1, color: '#fff', fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 700 }}>Calculadora</span>
+          <button onClick={logout} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', padding: '6px 10px' }}>
+            Cerrar sesión
+          </button>
+        </div>
+        <main id="main" style={{ width: '100%', minHeight: '100vh', paddingTop: 54 }}>
+          <Suspense fallback={<Loader />}>
+            <Calculadora />
+          </Suspense>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="app-layout">

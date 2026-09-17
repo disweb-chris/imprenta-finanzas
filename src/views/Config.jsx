@@ -23,10 +23,37 @@ export default function Config() {
   const [mpReales, setMpReales] = useState([])
   const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
 
+  const [roles, setRoles] = useState([])
+  const [roleForm, setRoleForm] = useState({ email: '', rol: 'gestor' })
+
   useEffect(() => {
     getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo }))
     loadMpReales()
+    loadRoles()
   }, [])
+
+  const loadRoles = async () => {
+    const snap = await getDocs(collection(db, 'roles'))
+    const rows = []
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }))
+    setRoles(rows)
+  }
+
+  const guardarRol = async () => {
+    const email = roleForm.email.trim().toLowerCase()
+    if (!email) { toast('Ingresá el email', 'error'); return }
+    await setDoc(doc(db, 'roles', email), { rol: roleForm.rol, updatedAt: new Date().toISOString() })
+    setRoleForm({ email: '', rol: 'gestor' })
+    toast('Acceso guardado', 'success')
+    loadRoles()
+  }
+
+  const eliminarRol = async (email) => {
+    if (!confirm(`¿Sacarle el rol restringido a ${email}? Va a volver a tener acceso completo.`)) return
+    await deleteDoc(doc(db, 'roles', email))
+    toast('Eliminado')
+    loadRoles()
+  }
 
   const loadMpReales = async () => {
     const snap = await getDocs(collection(db, 'comisiones_mp_reales'))
@@ -181,6 +208,36 @@ export default function Config() {
             ))
           }
         </div>
+      </div>
+
+      {/* Accesos por rol */}
+      <div className="table-card">
+        <div className="table-card-header"><h3>Accesos restringidos</h3></div>
+        <div style={{ padding: '16px 20px 4px' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Un usuario con rol <strong>Gestor</strong> solo ve la Calculadora al iniciar sesión — sin acceso a ninguna otra pantalla de Finanzas. Cualquier email sin registro acá tiene acceso completo (Admin). Primero creá el login en Firebase Console → Authentication → Add user, y después asignale el rol acá.
+          </p>
+          <div className="field-row">
+            <div className="field"><label>Email</label><input value={roleForm.email} onChange={e => setRoleForm(f => ({ ...f, email: e.target.value }))} placeholder="gestor@imprentaonline.ar" /></div>
+            <div className="field"><label>Rol</label>
+              <select value={roleForm.rol} onChange={e => setRoleForm(f => ({ ...f, rol: e.target.value }))}>
+                <option value="gestor">Gestor (solo Calculadora)</option>
+                <option value="admin">Admin (acceso completo)</option>
+              </select>
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={guardarRol} style={{ marginBottom: 12 }}>+ Guardar acceso</button>
+        </div>
+        {roles.length === 0
+          ? <div className="empty-state"><p>Sin restricciones cargadas — todos los que inician sesión tienen acceso completo</p></div>
+          : roles.map(r => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderTop: '1px solid var(--border)' }}>
+              <span style={{ flex: 1, fontSize: 13 }}>{r.id}</span>
+              <span className={`badge ${r.rol === 'gestor' ? 'badge-orange' : 'badge-blue'}`}>{r.rol === 'gestor' ? 'Gestor' : 'Admin'}</span>
+              <button className="btn btn-danger btn-sm" onClick={() => eliminarRol(r.id)}>×</button>
+            </div>
+          ))
+        }
       </div>
 
       {/* Migración */}
