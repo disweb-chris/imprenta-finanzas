@@ -42,17 +42,19 @@ export default function App() {
   if (!user) return <Login />
 
   // Rol restringido: solo la calculadora, sin sidebar ni acceso a ninguna otra pantalla
+  // Nota: sin className="app-layout" a propósito — esa clase fija height:100vh y
+  // overflow:hidden para el layout con sidebar, y acá cortaría el scroll de la página.
   if (role === 'gestor') {
     return (
-      <div className="app-layout" style={{ display: 'block' }}>
-        <div className="mobile-header" style={{ display: 'flex' }}>
+      <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+        <div className="mobile-header" style={{ display: 'flex', position: 'sticky', top: 0 }}>
           <img src="https://imprentaonline.ar/wp-content/uploads/2026/02/logo-blanco.webp" alt="IO" style={{ height: 26 }} />
           <span style={{ flex: 1, color: '#fff', fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 700 }}>Calculadora</span>
           <button onClick={logout} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', padding: '6px 10px' }}>
             Cerrar sesión
           </button>
         </div>
-        <main id="main" style={{ width: '100%', minHeight: '100vh', paddingTop: 54 }}>
+        <main>
           <Suspense fallback={<Loader />}>
             <Calculadora />
           </Suspense>
