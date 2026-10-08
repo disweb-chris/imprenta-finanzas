@@ -60,3 +60,11 @@ export const statusBadge = (s) => {
   const labels = { completed: 'Completado', processing: 'En proceso', 'on-hold': 'En espera', cancelled: 'Cancelado', pending: 'Pendiente' }
   return { cls: map[s] || 'badge-gray', label: labels[s] || s }
 }
+// Medios de pago de egresos. "canje" = pago en especie (trabajo de Imprenta Online):
+// registra el costo pero no mueve banco ni efectivo.
+export const MEDIO_PAGO = {
+  banco:    { label: 'Banco',    badge: 'badge-blue' },
+  efectivo: { label: 'Efectivo', badge: 'badge-orange' },
+  canje:    { label: 'Canje',    badge: 'badge-gray' },
+}
+export const medioPagoInfo = (m) => MEDIO_PAGO[m] || MEDIO_PAGO.banco

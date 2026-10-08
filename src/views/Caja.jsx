@@ -126,6 +126,8 @@ export default function Caja() {
           const ct = new Date(cierre.timestamp)
           if (!ec || ec<=ct) return
         }
+        // Canje: pago en especie, no mueve banco ni efectivo
+        if (x.medio_pago==='canje') return
         const m=parseFloat(x.monto||0)
         egresosTotal+=m
         if (x.medio_pago==='efectivo') egresosEfectivo+=m

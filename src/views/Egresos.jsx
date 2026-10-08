@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, medioPagoInfo } from '../utils/helpers'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
@@ -122,7 +122,7 @@ export default function Egresos() {
                     <td><span className="cat-dot" style={{ background: cat.color }} />{cat.nombre}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{e.subcategoria || '-'}</td>
                     <td>{e.descripcion || '-'}</td>
-                    <td><span className={`badge ${e.medio_pago === 'efectivo' ? 'badge-orange' : 'badge-blue'}`}>{e.medio_pago === 'efectivo' ? 'Efectivo' : 'Banco'}</span></td>
+                    <td><span className={`badge ${medioPagoInfo(e.medio_pago).badge}`}>{medioPagoInfo(e.medio_pago).label}</span></td>
                     <td className="text-right"><strong>{fmt(e.monto)}</strong></td>
                     <td className="text-center" style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => { openEdit(e); setShowModal(true) }}>Editar</button>
@@ -179,6 +179,7 @@ export default function Egresos() {
               <select value={form.medio_pago} onChange={e => setForm(f => ({ ...f, medio_pago: e.target.value }))}>
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
+                <option value="canje">Canje (no mueve banco ni efectivo)</option>
               </select>
             </div>
             <div className="modal-footer">
