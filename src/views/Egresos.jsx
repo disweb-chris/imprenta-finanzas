@@ -180,6 +180,7 @@ export default function Egresos() {
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="canje">Canje (no mueve banco ni efectivo)</option>
+                {form.medio_pago === 'a_pagar' && <option value="a_pagar">A pagar (se paga desde Cuentas a pagar)</option>}
               </select>
             </div>
             <div className="modal-footer">

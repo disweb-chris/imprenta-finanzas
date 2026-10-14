@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy, limit, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, mueveCaja } from '../utils/helpers'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
+import { getAppConfig } from '../utils/appConfig'
+import { calcAgip } from '../utils/impuestos'
+import { loadCuentasPagar } from '../utils/cuentasPagar'
 
 // Parsear fecha del historial: "27/04/2026 13:45" -> Date
 function parseFechaHistorial(s) {
@@ -31,6 +34,9 @@ function getCobrosDelPeriodo(order, desde) {
   }
   return []
 }
+
+// Diferencia de arqueo: positiva = sobra plata, negativa = falta
+const DifCell=({v})=>Math.abs(v)<1?<span style={{color:'var(--success)',fontWeight:600}}>OK</span>:<span style={{color:v>0?'var(--success)':'var(--danger)',fontWeight:700}}>{v>0?'+':''}{fmt(v)}</span>
 
 const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
 
@@ -92,11 +98,12 @@ export default function Caja() {
         ? _ls(new Date(desde))
         : (()=>{ const n=new Date(desde); n.setDate(n.getDate()+1); return _ls(n) })()
 
-      const [ordNuevas, ordAntiguas, egrSnap, extraSnap] = await Promise.all([
+      const [ordNuevas, ordAntiguas, egrSnap, extraSnap, pagosProvSnap] = await Promise.all([
         fetchOrders(desde, ahora, 'completed,processing').catch(()=>[]),
         fetchOrders(new Date(desde.getTime()-60*86400000), desde, 'completed,processing,on-hold').catch(()=>[]),
         getDocs(query(collection(db,'egresos'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
         getDocs(query(collection(db,'ingresos_extra'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
+        getDocs(query(collection(db,'pagos_proveedores'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
       ])
 
       const ordMap = {}
@@ -119,20 +126,22 @@ export default function Caja() {
       })
 
       let egresosTotal=0, egresosBanco=0, egresosEfectivo=0
-      egrSnap.forEach(d => {
-        const x=d.data()
+      // Egresos con plata real + pagos de cuentas corrientes a proveedores.
+      // Los egresos en canje o 'a pagar' son costo sin movimiento: se saltean.
+      const sumarSalida = (x) => {
         if (cierre?.timestamp && x.fecha===cierre.fecha) {
           const ec = x.createdAt ? new Date(x.createdAt) : null
           const ct = new Date(cierre.timestamp)
           if (!ec || ec<=ct) return
         }
-        // Canje: pago en especie, no mueve banco ni efectivo
-        if (x.medio_pago==='canje') return
+        if (!mueveCaja(x.medio_pago)) return
         const m=parseFloat(x.monto||0)
         egresosTotal+=m
         if (x.medio_pago==='efectivo') egresosEfectivo+=m
         else egresosBanco+=m
-      })
+      }
+      egrSnap.forEach(d => sumarSalida(d.data()))
+      pagosProvSnap.forEach(d => sumarSalida(d.data()))
 
       let ingExtra=0
       const extras=[]
@@ -178,26 +187,32 @@ export default function Caja() {
         if(p>0) pendientes.push({nombre:c.nombre,monto:p,categoria:c.categoria,fecha:fp})
       }
     })
-    const vA=new Date(now.getFullYear(),now.getMonth(),10)
-    if(vA>=now){try{
-      const mA=new Date(now.getFullYear(),now.getMonth()-1,1)
-      const mAF=new Date(now.getFullYear(),now.getMonth(),0,23,59,59)
-      const ob=await fetchOrders(mA,mAF,'completed,processing')
-      const base=ob.reduce((s,o)=>s+parseFloat(o.total||0),0)
-      if(base>0) pendientes.push({nombre:'AGIP — Ingresos Brutos',monto:base*0.04,categoria:'impuestos',fecha:_ls(vA)})
-    }catch{}}
+    try{
+      const agip=await calcAgip(await getAppConfig())
+      if(!agip.pagado&&agip.monto>0&&agip.venc<=finMes) pendientes.push({nombre:`AGIP — IIBB ${agip.mesLabel}`,monto:agip.monto,categoria:'impuestos',fecha:agip.venc<hoy?hoy:agip.venc})
+    }catch{ /* sin WooCommerce no hay base para estimar */ }
+    try{
+      const cuentas=await loadCuentasPagar({soloAbiertas:true})
+      cuentas.forEach(c=>{ if(c.saldo>0&&(c.vencimiento||hoy)<=finMes) pendientes.push({nombre:`${c.proveedor} — ${c.concepto}`,monto:c.saldo,categoria:'produccion-tercerizada',fecha:c.vencimiento<hoy?hoy:c.vencimiento}) })
+    }catch{ /* colección todavía vacía */ }
     const total=pendientes.reduce((s,p)=>s+p.monto,0)
     setProyeccion({saldoActual,totalPendiente:total,saldoProyectado:saldoActual-total,pendientes})
   }
 
   const openCierre=()=>{setCierreForm({saldo:Math.round(saldoCalc),saldo_banco:Math.round(kpis.saldoBanco),saldo_efectivo:Math.round(kpis.saldoEfectivo),fecha:todayStr(),notas:''});setShowCierre(true)}
 
+  // Arqueo: lo contado/real contra lo que calcula el sistema desde el último cierre
+  const difBanco=(parseFloat(cierreForm.saldo_banco)||0)-Math.round(kpis.saldoBanco)
+  const difEfectivo=(parseFloat(cierreForm.saldo_efectivo)||0)-Math.round(kpis.saldoEfectivo)
+  const difTotal=(parseFloat(cierreForm.saldo)||0)-Math.round(saldoCalc)
+
   const guardarCierre=async()=>{
     const saldo=parseFloat(cierreForm.saldo)
     if(!cierreForm.fecha||isNaN(saldo)){toast('Completá fecha y saldo','error');return}
     const ex=await getDocs(query(collection(db,'cierres_caja'),where('fecha','==',cierreForm.fecha)))
     if(!ex.empty){if(!confirm('Ya existe un cierre para esta fecha. ¿Reemplazarlo?')) return; for(const d of ex.docs) await deleteDoc(doc(db,'cierres_caja',d.id))}
-    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,notas:cierreForm.notas,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
+    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,notas:cierreForm.notas,
+      saldo_calculado:Math.round(saldoCalc),diferencia:difTotal,diferencia_banco:difBanco,diferencia_efectivo:difEfectivo,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
     await guardarSnapshotDeuda(cierreForm.fecha)
     setShowCierre(false);toast('Cierre guardado','success');loadAll()
   }
@@ -334,7 +349,7 @@ export default function Caja() {
       <div className="table-card">
         <div className="table-card-header"><h3>Historial de cierres</h3><button className="btn btn-secondary btn-sm" onClick={loadAll}>Actualizar</button></div>
         {historial.length===0?<div className="empty-state"><p>Sin cierres registrados</p></div>:
-          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
+          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th className="text-right">Diferencia</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
           <tbody>{historial.map(c=>(
             <tr key={c.id}>
               <td><strong>{fmtDate(c.fecha)}</strong></td>
@@ -342,6 +357,7 @@ export default function Caja() {
               <td className="text-right" style={{fontFamily:'var(--font-head)',fontWeight:700,color:'var(--blue)'}}>{fmt(c.saldo_final)}</td>
               <td className="text-right" style={{fontSize:13,color:'#2e509e',fontWeight:600}}>{c.saldo_banco!=null?fmt(c.saldo_banco):'-'}</td>
               <td className="text-right" style={{fontSize:13,color:'#FF6B00',fontWeight:600}}>{c.saldo_efectivo!=null?fmt(c.saldo_efectivo):'-'}</td>
+              <td className="text-right" style={{fontSize:12}}>{c.diferencia==null?<span style={{color:'var(--text-muted)'}}>-</span>:<DifCell v={c.diferencia}/>}</td>
               <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.notas||'-'}</td>
               <td className="text-center"><button className="btn btn-danger btn-sm" onClick={()=>deleteCierre(c.id)}>×</button></td>
             </tr>
@@ -353,8 +369,16 @@ export default function Caja() {
           <div className="modal" style={{width:420}}>
             <div className="modal-header"><h3>Cierre de Caja</h3><button className="modal-close" onClick={()=>setShowCierre(false)}>×</button></div>
             <div style={{background:'#f0f4f8',borderRadius:8,padding:14,marginBottom:16,fontSize:13}}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}><span style={{color:'var(--text-muted)'}}>Saldo calculado:</span><strong>{fmt(saldoCalc)}</strong></div>
-              <div style={{fontSize:11,color:'var(--text-muted)'}}>Ajustá si hay diferencia con el saldo real en cuenta.</div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--text-muted)',marginBottom:8}}>Arqueo</div>
+              <table style={{width:'100%',fontSize:12}}>
+                <thead><tr><th style={{textAlign:'left'}}></th><th className="text-right">Sistema</th><th className="text-right">Real</th><th className="text-right">Diferencia</th></tr></thead>
+                <tbody>
+                  <tr><td>Banco</td><td className="text-right">{fmt(kpis.saldoBanco)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_banco)||0)}</td><td className="text-right"><DifCell v={difBanco}/></td></tr>
+                  <tr><td>Efectivo</td><td className="text-right">{fmt(kpis.saldoEfectivo)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_efectivo)||0)}</td><td className="text-right"><DifCell v={difEfectivo}/></td></tr>
+                  <tr><td><strong>Total</strong></td><td className="text-right"><strong>{fmt(saldoCalc)}</strong></td><td className="text-right"><strong>{fmt(parseFloat(cierreForm.saldo)||0)}</strong></td><td className="text-right"><DifCell v={difTotal}/></td></tr>
+                </tbody>
+              </table>
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>Cargá lo que realmente hay en el banco y lo que contaste en efectivo. Si hay diferencia, anotá el motivo en notas.</div>
             </div>
             <div className="field"><label>Saldo total en cuenta ($)</label><input type="number" value={cierreForm.saldo} onChange={e=>setCierreForm(f=>({...f,saldo:e.target.value}))}/></div>
             <div className="field-row">

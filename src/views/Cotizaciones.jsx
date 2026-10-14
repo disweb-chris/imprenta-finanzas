@@ -3,7 +3,7 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy 
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
 import { searchCustomers } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, waLink } from '../utils/helpers'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
@@ -15,16 +15,12 @@ const ESTADOS = {
   convertido: { label: 'Convertido a pedido', cls: 'badge-orange' },
 }
 
-const FORM_VACIO = {
+// Función y no constante: la fecha tiene que ser la del día en que se abre el formulario
+const formVacio = () => ({
   id: '', cliente_nombre: '', cliente_email: '', cliente_telefono: '', cliente_wc_id: null,
   fecha: todayStr(), estado: 'borrador', monto: '', detalle: '',
   archivos_presupuesto: [], archivos_oc: [],
-}
-
-const waLink = (telefono) => {
-  const digits = String(telefono || '').replace(/\D/g, '')
-  return digits ? `https://wa.me/${digits}` : null
-}
+})
 
 const subirArchivo = async (cotId, carpeta, file) => {
   const path = `cotizaciones/${cotId}/${carpeta}/${Date.now()}_${file.name}`
@@ -43,7 +39,7 @@ export default function Cotizaciones() {
   const [filterEstado, setFilterEstado] = useState('')
 
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState(FORM_VACIO)
+  const [form, setForm] = useState(formVacio)
   const [nuevosPresupuesto, setNuevosPresupuesto] = useState([])
   const [nuevosOc, setNuevosOc] = useState([])
   const [guardando, setGuardando] = useState(false)
@@ -66,19 +62,24 @@ export default function Cotizaciones() {
   useEffect(() => {
     if (!showModal) return
     if (clienteQuery.trim().length < 2) { setClienteResults([]); return }
+    let vigente = true // descarta respuestas de búsquedas anteriores que lleguen tarde
     const t = setTimeout(async () => {
       setBuscandoCliente(true)
-      try { setClienteResults(await searchCustomers(clienteQuery)) }
-      catch { setClienteResults([]) }
+      let res = []
+      try { res = await searchCustomers(clienteQuery) } catch { /* sin resultados */ }
+      if (!vigente) return
+      setClienteResults(res)
       setBuscandoCliente(false)
     }, 350)
-    return () => clearTimeout(t)
+    return () => { vigente = false; clearTimeout(t) }
   }, [clienteQuery, showModal])
 
   const elegirCliente = (c) => {
+    const nombre = `${c.first_name || ''} ${c.last_name || ''}`.trim()
+      || `${c.billing?.first_name || ''} ${c.billing?.last_name || ''}`.trim()
     setForm(f => ({
       ...f,
-      cliente_nombre: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.username || f.cliente_nombre,
+      cliente_nombre: nombre || c.username || f.cliente_nombre,
       cliente_email: c.email || f.cliente_email,
       cliente_telefono: c.billing?.phone || f.cliente_telefono,
       cliente_wc_id: c.id,
@@ -88,7 +89,7 @@ export default function Cotizaciones() {
   }
 
   const openNew = () => {
-    setForm(FORM_VACIO)
+    setForm(formVacio())
     setNuevosPresupuesto([])
     setNuevosOc([])
     setClienteQuery('')
@@ -142,6 +143,8 @@ export default function Cotizaciones() {
           ...data, archivos_presupuesto: [], archivos_oc: [], createdAt: new Date().toISOString(),
         })
         id = ref_.id
+        // Si la subida de archivos falla, reintentar guardar actualiza este doc en vez de duplicarlo
+        setForm(f => ({ ...f, id }))
       }
 
       if (nuevosPresupuesto.length || nuevosOc.length) {
@@ -149,10 +152,14 @@ export default function Cotizaciones() {
           Promise.all(nuevosPresupuesto.map(f => subirArchivo(id, 'presupuestos', f))),
           Promise.all(nuevosOc.map(f => subirArchivo(id, 'oc', f))),
         ])
-        await updateDoc(doc(db, 'cotizaciones', id), {
+        const archivos = {
           archivos_presupuesto: [...form.archivos_presupuesto, ...subidosPresupuesto],
           archivos_oc: [...form.archivos_oc, ...subidosOc],
-        })
+        }
+        await updateDoc(doc(db, 'cotizaciones', id), archivos)
+        setForm(f => ({ ...f, ...archivos }))
+        setNuevosPresupuesto([])
+        setNuevosOc([])
       }
 
       toast('Cotización guardada', 'success')
@@ -178,9 +185,11 @@ export default function Cotizaciones() {
     }
   }
 
-  const remove = async (id) => {
-    if (!confirm('¿Eliminar esta cotización? Los archivos subidos no se eliminan automáticamente.')) return
-    await deleteDoc(doc(db, 'cotizaciones', id))
+  const remove = async (c) => {
+    if (!confirm('¿Eliminar esta cotización y sus archivos?')) return
+    const archivos = [...(c.archivos_presupuesto || []), ...(c.archivos_oc || [])]
+    await Promise.all(archivos.map(a => deleteObject(ref(storage, a.path)).catch(() => { /* ya no existe */ })))
+    await deleteDoc(doc(db, 'cotizaciones', c.id))
     toast('Cotización eliminada')
     load()
   }
@@ -256,7 +265,7 @@ export default function Cotizaciones() {
                         </td>
                         <td className="text-center" style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                           <button className="btn btn-secondary btn-sm" onClick={() => openEdit(c)}>Ver / Editar</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => remove(c.id)}>×</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => remove(c)}>×</button>
                         </td>
                       </tr>
                     )
@@ -338,9 +347,12 @@ export default function Cotizaciones() {
                 </div>
               ))}
               {nuevosPresupuesto.map((f, i) => (
-                <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>⏳ {f.name} (se sube al guardar)</div>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  <span style={{ flex: 1 }}>⏳ {f.name} (se sube al guardar)</span>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setNuevosPresupuesto(prev => prev.filter((_, j) => j !== i))}>Quitar</button>
+                </div>
               ))}
-              <input type="file" multiple onChange={e => setNuevosPresupuesto(prev => [...prev, ...Array.from(e.target.files)])} />
+              <input type="file" multiple onChange={e => { const files = Array.from(e.target.files); e.target.value = ''; setNuevosPresupuesto(prev => [...prev, ...files]) }} />
             </div>
 
             <div className="field">
@@ -352,9 +364,12 @@ export default function Cotizaciones() {
                 </div>
               ))}
               {nuevosOc.map((f, i) => (
-                <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>⏳ {f.name} (se sube al guardar)</div>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  <span style={{ flex: 1 }}>⏳ {f.name} (se sube al guardar)</span>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setNuevosOc(prev => prev.filter((_, j) => j !== i))}>Quitar</button>
+                </div>
               ))}
-              <input type="file" multiple onChange={e => setNuevosOc(prev => [...prev, ...Array.from(e.target.files)])} />
+              <input type="file" multiple onChange={e => { const files = Array.from(e.target.files); e.target.value = ''; setNuevosOc(prev => [...prev, ...files]) }} />
             </div>
 
             <div className="modal-footer">
