@@ -19,14 +19,41 @@ export default function Config() {
   const [showCatModal, setShowCatModal] = useState(false)
   const [migrando, setMigrando] = useState(false)
 
-  const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '' })
+  const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '', iibb_alicuota_pct: '', iibb_dia_venc: '' })
   const [mpReales, setMpReales] = useState([])
   const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
 
+  const [roles, setRoles] = useState([])
+  const [roleForm, setRoleForm] = useState({ email: '', rol: 'gestor' })
+
   useEffect(() => {
-    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo }))
+    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo, iibb_alicuota_pct: cfg.iibb_alicuota_pct, iibb_dia_venc: cfg.iibb_dia_venc }))
     loadMpReales()
+    loadRoles()
   }, [])
+
+  const loadRoles = async () => {
+    const snap = await getDocs(collection(db, 'roles'))
+    const rows = []
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }))
+    setRoles(rows)
+  }
+
+  const guardarRol = async () => {
+    const email = roleForm.email.trim().toLowerCase()
+    if (!email) { toast('Ingresá el email', 'error'); return }
+    await setDoc(doc(db, 'roles', email), { rol: roleForm.rol, updatedAt: new Date().toISOString() })
+    setRoleForm({ email: '', rol: 'gestor' })
+    toast('Acceso guardado', 'success')
+    loadRoles()
+  }
+
+  const eliminarRol = async (email) => {
+    if (!confirm(`¿Sacarle el rol restringido a ${email}? Va a volver a tener acceso completo.`)) return
+    await deleteDoc(doc(db, 'roles', email))
+    toast('Eliminado')
+    loadRoles()
+  }
 
   const loadMpReales = async () => {
     const snap = await getDocs(collection(db, 'comisiones_mp_reales'))
@@ -40,6 +67,8 @@ export default function Config() {
     await saveAppConfig({
       mp_comision_pct: parseFloat(paramsForm.mp_comision_pct) || 0,
       monotributo_techo: parseFloat(paramsForm.monotributo_techo) || 0,
+      iibb_alicuota_pct: parseFloat(paramsForm.iibb_alicuota_pct) || 0,
+      iibb_dia_venc: Math.min(Math.max(parseInt(paramsForm.iibb_dia_venc) || 10, 1), 28),
     })
     toast('Parámetros guardados', 'success')
   }
@@ -153,6 +182,18 @@ export default function Config() {
               <input type="number" value={paramsForm.monotributo_techo}
                 onChange={e => setParamsForm(f => ({ ...f, monotributo_techo: e.target.value }))} placeholder="Ej: 68000000" />
             </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Alícuota IIBB / AGIP (%)</label>
+                <input type="number" step="0.01" value={paramsForm.iibb_alicuota_pct}
+                  onChange={e => setParamsForm(f => ({ ...f, iibb_alicuota_pct: e.target.value }))} placeholder="4" />
+              </div>
+              <div className="field">
+                <label>Día de vencimiento AGIP</label>
+                <input type="number" min="1" max="28" value={paramsForm.iibb_dia_venc}
+                  onChange={e => setParamsForm(f => ({ ...f, iibb_dia_venc: e.target.value }))} placeholder="10" />
+              </div>
+            </div>
             <button className="btn btn-primary" onClick={saveParams}>Guardar parámetros</button>
           </div>
         </div>
@@ -181,6 +222,36 @@ export default function Config() {
             ))
           }
         </div>
+      </div>
+
+      {/* Accesos por rol */}
+      <div className="table-card">
+        <div className="table-card-header"><h3>Accesos restringidos</h3></div>
+        <div style={{ padding: '16px 20px 4px' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Un usuario con rol <strong>Gestor</strong> solo ve la Calculadora al iniciar sesión — sin acceso a ninguna otra pantalla de Finanzas. Cualquier email sin registro acá tiene acceso completo (Admin). Primero creá el login en Firebase Console → Authentication → Add user, y después asignale el rol acá.
+          </p>
+          <div className="field-row">
+            <div className="field"><label>Email</label><input value={roleForm.email} onChange={e => setRoleForm(f => ({ ...f, email: e.target.value }))} placeholder="gestor@imprentaonline.ar" /></div>
+            <div className="field"><label>Rol</label>
+              <select value={roleForm.rol} onChange={e => setRoleForm(f => ({ ...f, rol: e.target.value }))}>
+                <option value="gestor">Gestor (solo Calculadora)</option>
+                <option value="admin">Admin (acceso completo)</option>
+              </select>
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={guardarRol} style={{ marginBottom: 12 }}>+ Guardar acceso</button>
+        </div>
+        {roles.length === 0
+          ? <div className="empty-state"><p>Sin restricciones cargadas — todos los que inician sesión tienen acceso completo</p></div>
+          : roles.map(r => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderTop: '1px solid var(--border)' }}>
+              <span style={{ flex: 1, fontSize: 13 }}>{r.id}</span>
+              <span className={`badge ${r.rol === 'gestor' ? 'badge-orange' : 'badge-blue'}`}>{r.rol === 'gestor' ? 'Gestor' : 'Admin'}</span>
+              <button className="btn btn-danger btn-sm" onClick={() => eliminarRol(r.id)}>×</button>
+            </div>
+          ))
+        }
       </div>
 
       {/* Migración */}

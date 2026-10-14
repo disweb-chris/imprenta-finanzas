@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr, daysUntil, MEDIOS_PAGO } from '../utils/helpers'
-import { esPedidoCobroSaldo } from '../utils/pedidos'
+import { fmt, fmtDate, todayStr, daysUntil } from '../utils/helpers'
+import { calcAgip, calcMonotributo as calcMonotributo_ } from '../utils/impuestos'
+import AgipCard from '../components/AgipCard'
 import { getAppConfig } from '../utils/appConfig'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
@@ -24,7 +24,6 @@ export default function Compromisos() {
   const [editData, setEditData] = useState(null)
   const [pagarComp, setPagarComp] = useState(null)
   const [pagarForm, setPagarForm] = useState({ monto: '', fecha: todayStr(), medio_pago: 'banco' })
-  const [agipMedioPago, setAgipMedioPago] = useState('banco')
   const [form, setForm] = useState({ nombre: '', tipo: 'recurrente', frecuencia: 'mensual', monto: '', categoria: '', total_cuotas: '', cuotas_pagadas: 0, fecha_proximo_pago: '', estado: 'activo', notas: '' })
   const { categorias } = useCats()
   const [kpis, setKpis] = useState({ totalMensual: 0, vencen: 0, activos: 0 })
@@ -45,13 +44,8 @@ export default function Compromisos() {
   const calcMonotributo = async () => {
     try {
       const cfg = await getAppConfig()
-      const techo = parseFloat(cfg.monotributo_techo || 0)
-      if (!techo) { setMonotributo(null); return }
-      const now = new Date()
-      const start = new Date(now.getFullYear(), now.getMonth() - 11, 1) // 12 meses móviles, incluye el actual
-      const ords = await fetchOrders(start, now, 'completed,processing')
-      const facturado = ords.filter(o => !esPedidoCobroSaldo(o)).reduce((s, o) => s + parseFloat(o.total || 0), 0)
-      setMonotributo({ facturado, techo, pct: facturado / techo * 100 })
+      if (!parseFloat(cfg.monotributo_techo || 0)) { setMonotributo(null); return }
+      setMonotributo(await calcMonotributo_(cfg))
     } catch { setMonotributo(null) }
   }
 
@@ -127,22 +121,7 @@ export default function Compromisos() {
   }
 
   const calcAGIP = async () => {
-    const now = new Date()
-    let venc = new Date(now.getFullYear(), now.getMonth(), 10)
-    if (now > venc) venc = new Date(now.getFullYear(), now.getMonth() + 1, 10)
-    const mesAnt = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    const mesAntFin = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
-    const vencStr = _ls(venc)
-    try {
-      const [ords, pagoSnap] = await Promise.all([
-        fetchOrders(mesAnt, mesAntFin, 'completed,processing'),
-        getDocs(query(collection(db, 'egresos'), where('origen_agip_venc', '==', vencStr))),
-      ])
-      const base = ords.reduce((s, o) => s + parseFloat(o.total || 0), 0)
-      const monto = base * 0.04
-      const days = daysUntil(vencStr)
-      setAgip({ monto, base, venc: vencStr, days, mesLabel: mesAnt.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }), pagado: !pagoSnap.empty })
-    } catch {}
+    try { setAgip(await calcAgip(await getAppConfig())) } catch { setAgip(null) }
   }
 
   const openNew = () => { setEditData(null); setForm({ nombre: '', tipo: 'recurrente', frecuencia: 'mensual', monto: '', categoria: '', total_cuotas: '', cuotas_pagadas: 0, fecha_proximo_pago: '', estado: 'activo', notas: '' }); setShowModal(true) }
@@ -215,18 +194,6 @@ export default function Compromisos() {
     setShowPagar(false)
     if (pagarComp.categoria !== 'sueldos') toast('Pago registrado', 'success')
     loadAll()
-  }
-
-  const pagarAGIP = async () => {
-    if (!agip || agip.pagado) return
-    await addDoc(collection(db, 'egresos'), {
-      fecha: todayStr(), monto: Math.round(agip.monto), categoria: 'impuestos',
-      descripcion: 'AGIP — Ingresos Brutos (4%)', medio_pago: agipMedioPago,
-      origen_agip_venc: agip.venc,
-      usuario: user.email, createdAt: new Date().toISOString()
-    })
-    setAgip(a => ({ ...a, pagado: true }))
-    toast('Pago AGIP registrado como egreso', 'success')
   }
 
   const nextDate = (from, freq) => {
@@ -319,46 +286,7 @@ export default function Compromisos() {
         return <div key={c.id} className="alert-warning">⚠️ <strong>{c.nombre}</strong> vence {d === 0 ? 'hoy' : d === 1 ? 'mañana' : `en ${d} días`} — {fmt(c.monto)}</div>
       })}
 
-      {/* AGIP card */}
-      {agip && (
-        <div style={{ background: 'linear-gradient(135deg,#1e3a7a,#2e509e)', borderRadius: 12, padding: '18px 20px', marginBottom: 16, color: '#fff' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 42, height: 42, background: 'rgba(255,255,255,.15)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 13 }}>AGIP</div>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: 15 }}>AGIP — Ingresos Brutos</div>
-                <div style={{ fontSize: 12, opacity: .75 }}>4% sobre ingresos de {agip.mesLabel} · Vence día 10</div>
-                <div style={{ fontSize: 11, opacity: .6, marginTop: 4 }}>Base: {fmt(agip.base)}</div>
-              </div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800 }}>{fmt(agip.monto)}</div>
-              <div style={{ marginTop: 4 }}>
-                {agip.pagado
-                  ? <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 20, fontWeight: 600, background: 'rgba(255,255,255,.2)', color: '#fff' }}>✓ Pagado</span>
-                  : <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 20, fontWeight: 600, background: agip.days <= 0 ? '#ef4444' : agip.days <= 5 ? '#f59e0b' : 'rgba(255,255,255,.2)', color: '#fff' }}>
-                      {agip.days <= 0 ? 'Vence hoy' : agip.days <= 5 ? `Vence en ${agip.days}d` : `Vence ${fmtDate(agip.venc)}`}
-                    </span>
-                }
-              </div>
-              {!agip.pagado && (
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
-                  <select value={agipMedioPago} onChange={e => setAgipMedioPago(e.target.value)}
-                    style={{ padding: '7px 8px', borderRadius: 7, border: 'none', fontSize: 12 }}>
-                    <option value="banco">Banco</option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="caja_chica">Caja chica</option>
-                    <option value="tarjeta">Tarjeta</option>
-                  </select>
-                  <button onClick={pagarAGIP} style={{ padding: '8px 16px', background: 'var(--orange)', border: 'none', borderRadius: 7, color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                    Registrar pago
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {agip && <AgipCard agip={agip} onPagado={calcAGIP} />}
 
       {/* Monotributo card */}
       {monotributo && (
@@ -435,7 +363,9 @@ export default function Compromisos() {
             <div className="field">
               <label>Medio de pago</label>
               <select value={pagarForm.medio_pago} onChange={e => setPagarForm(f=>({...f,medio_pago:e.target.value}))}>
-                {MEDIOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                <option value="banco">Banco / Transferencia</option>
+                <option value="efectivo">Efectivo</option>
+                <option value="caja_chica">Caja chica</option>
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>

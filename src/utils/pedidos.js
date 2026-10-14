@@ -43,3 +43,12 @@ export function calcularComisionMP(orders, tasaPct, realesPorMes = {}) {
   })
   return { total, detalle }
 }
+
+// Saldo pendiente de un pedido. Con historial de pagos (metabox de cobros) es total − cobrado.
+// Sin historial: en espera (on-hold) se considera todo pendiente; el resto se asume cobrado.
+export function saldoPedido(o) {
+  const total = parseFloat(o.total || 0)
+  const tieneHistorial = Array.isArray(o.io_pagos_historial) && o.io_pagos_historial.length > 0
+  const cobrado = tieneHistorial ? getIngresoReal(o) : (o.status === 'on-hold' ? 0 : total)
+  return { total, cobrado, saldo: total - cobrado, sinPagos: !tieneHistorial }
+}

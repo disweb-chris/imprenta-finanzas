@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore'
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr, MEDIOS_PAGO, medioInfo } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, medioPagoInfo, localDateStr } from '../utils/helpers'
+import { crearCuentaPagar } from '../utils/cuentasPagar'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
@@ -34,6 +35,8 @@ export default function Liquidacion() {
   const [calculando, setCalculando] = useState(false)
   const [calculado, setCalculado] = useState(false)
   const [registrando, setRegistrando] = useState(false)
+  // Vencimiento de la deuda para las líneas que quedan en cuenta corriente ("A pagar")
+  const [vencimientoCtaCte, setVencimientoCtaCte] = useState(localDateStr(new Date(Date.now() + 15 * 86400000)))
 
   // Modal proveedor
   const [showProvModal, setShowProvModal] = useState(false)
@@ -161,12 +164,18 @@ export default function Liquidacion() {
   // ── Registrar pago ───────────────────────────────────────
   const registrarPago = async () => {
     if (!lineasActivas.length) { toast('No hay líneas activas', 'error'); return }
-    if (!confirm(`¿Registrar ${lineasActivas.length} egresos por ${fmt(totalAjustado)} total?`)) return
+    const lineasAPagar = lineasActivas.filter(l => l.medio_pago === 'a_pagar' && parseFloat(l.costo_ajustado || 0))
+    const msgCtaCte = lineasAPagar.length
+      ? `\n\n${lineasAPagar.length} línea(s) quedan como deuda en Cuentas a pagar, con vencimiento ${fmtDate(vencimientoCtaCte)}.`
+      : ''
+    if (!confirm(`¿Registrar ${lineasActivas.length} egresos por ${fmt(totalAjustado)} total?${msgCtaCte}`)) return
 
     setRegistrando(true)
     try {
       const fecha = todayStr()
       const egresoIds = []
+      const liqRef = doc(collection(db, 'liquidaciones'))
+      const ctaCtePorProveedor = {}
 
       for (const l of lineasActivas) {
         const monto = parseFloat(l.costo_ajustado || 0)
@@ -186,10 +195,25 @@ export default function Liquidacion() {
           updatedAt: new Date().toISOString(),
         })
         egresoIds.push(ref.id)
+        if (l.medio_pago === 'a_pagar') {
+          const g = ctaCtePorProveedor[l.proveedor] ||= { monto: 0, egreso_ids: [] }
+          g.monto += monto
+          g.egreso_ids.push(ref.id)
+        }
+      }
+
+      const mesLabel = new Date(mesImputacion + '-01T00:00:00').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+      const cuentaIds = []
+      for (const [proveedor, g] of Object.entries(ctaCtePorProveedor)) {
+        cuentaIds.push(await crearCuentaPagar({
+          proveedor, concepto: `Liquidación producción ${mesLabel}`,
+          monto: g.monto, fecha, vencimiento: vencimientoCtaCte,
+          egreso_ids: g.egreso_ids, origen_liquidacion: liqRef.id, usuario: user.email,
+        }))
       }
 
       // Guardar liquidación en historial
-      await addDoc(collection(db, 'liquidaciones'), {
+      await setDoc(liqRef, {
         fecha,
         periodo_start: periodoStart,
         periodo_end: periodoEnd,
@@ -207,6 +231,7 @@ export default function Liquidacion() {
           medio_pago: l.medio_pago,
         })),
         egreso_ids: egresoIds,
+        cuenta_pagar_ids: cuentaIds,
         usuario: user.email,
         createdAt: new Date().toISOString(),
       })
@@ -358,7 +383,11 @@ export default function Liquidacion() {
                     <td>
                       <select value={l.medio_pago} onChange={e => updateLinea(i, 'medio_pago', e.target.value)}
                         style={{ border: '1.5px solid var(--border)', borderRadius: 6, padding: '5px 8px', fontSize: 12 }}>
-                        {MEDIOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.short}</option>)}
+                        <option value="banco">Banco</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="caja_chica">Caja chica</option>
+                        <option value="canje">Canje</option>
+                        <option value="a_pagar">A pagar (cta. cte.)</option>
                       </select>
                     </td>
                     <td className="text-center">
@@ -393,6 +422,13 @@ export default function Liquidacion() {
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Líneas activas</div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 700 }}>{lineasActivas.length}</div>
               </div>
+              {lineasActivas.some(l => l.medio_pago === 'a_pagar') && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Vence cta. cte.</div>
+                  <input type="date" value={vencimientoCtaCte} onChange={e => setVencimientoCtaCte(e.target.value)}
+                    style={{ border: '1.5px solid var(--border)', borderRadius: 6, padding: '5px 8px', fontSize: 13 }} />
+                </div>
+              )}
             </div>
             <button
               className="btn btn-primary"
@@ -485,7 +521,7 @@ export default function Liquidacion() {
                     <td className="text-right" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(l.costo_calculado)}</td>
                     <td className="text-right" style={{ fontWeight: 700, color: 'var(--blue)' }}>{fmt(l.costo_ajustado)}</td>
                     <td style={{ fontSize: 12 }}>{l.proveedor}</td>
-                    <td><span className={`badge ${medioInfo(l.medio_pago || 'banco').badge}`}>{medioInfo(l.medio_pago || 'banco').short}</span></td>
+                    <td><span className={`badge ${medioPagoInfo(l.medio_pago).badge}`}>{medioPagoInfo(l.medio_pago).label}</span></td>
                   </tr>
                 ))}
               </tbody>

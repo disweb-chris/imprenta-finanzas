@@ -4,11 +4,12 @@ import { Line } from 'react-chartjs-2'
 import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, localDateStr, MEDIOS_PAGO, medioEgreso } from '../utils/helpers'
+import { fmt, localDateStr, MEDIO_PAGO } from '../utils/helpers'
 import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils/pedidos'
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
+import { exportarVentas, exportarEgresos } from '../utils/exportar'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
 
@@ -22,6 +23,7 @@ export default function Reportes() {
   const [chartData, setChartData] = useState(null)
   const [deudaChartData, setDeudaChartData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [datosPeriodo, setDatosPeriodo] = useState({ orders: [], egresos: [] })
 
   useEffect(() => { loadAll() }, [getPeriodDates])
   useEffect(() => { loadDeudaHistorial() }, [])
@@ -59,12 +61,14 @@ export default function Reportes() {
     let totalEgresos = 0
     const catTotals = {}
     const medioTotals = {}
+    const egresosPeriodo = []
     egrSnap.forEach(d => {
       const x = d.data()
+      egresosPeriodo.push(x)
       const m = parseFloat(x.monto || 0)
       totalEgresos += m
       catTotals[x.categoria] = (catTotals[x.categoria] || 0) + m
-      const medio = medioEgreso(x)
+      const medio = MEDIO_PAGO[x.medio_pago] ? x.medio_pago : 'banco'
       medioTotals[medio] = (medioTotals[medio] || 0) + m
     })
     let compMensual = 0
@@ -76,11 +80,12 @@ export default function Reportes() {
       else compMensual += m
     })
 
+    setDatosPeriodo({ orders, egresos: egresosPeriodo, desde: startStr, hasta: endStr })
     setResumen({
       totalIngresos, totalEgresos, compMensual, balance: totalIngresos - totalEgresos, ordenes: orders.length,
       comisionMP: comisionMPCalc.total, comisionMPTieneReal: comisionMPCalc.detalle.some(x => x.real != null),
     })
-    setMedioRows(MEDIOS_PAGO.map(md => ({ ...md, monto: medioTotals[md.id] || 0, pct: totalEgresos > 0 ? ((medioTotals[md.id] || 0) / totalEgresos * 100).toFixed(1) : 0 })))
+    setMedioRows(Object.entries(MEDIO_PAGO).map(([id, md]) => ({ id, ...md, monto: medioTotals[id] || 0, pct: totalEgresos > 0 ? ((medioTotals[id] || 0) / totalEgresos * 100).toFixed(1) : 0 })))
     setCatRows(Object.entries(catTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ cat: k, monto: v, pct: totalEgresos > 0 ? (v / totalEgresos * 100).toFixed(1) : 0 })))
 
     // 12 month chart
@@ -110,7 +115,19 @@ export default function Reportes() {
 
   return (
     <div className="view">
-      <div className="view-header"><h2>Reportes</h2><p>{periodLabel()}</p></div>
+      <div className="view-header-row">
+        <div><h2>Reportes</h2><p>{periodLabel()}</p></div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} title="Planillas del período elegido para mandarle al contador">
+          <button className="btn btn-secondary btn-sm" disabled={loading}
+            onClick={() => exportarVentas(`ventas_${datosPeriodo.desde}_${datosPeriodo.hasta}.csv`, datosPeriodo.orders)}>
+            ⬇ Ventas (Excel)
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={loading}
+            onClick={() => exportarEgresos(`egresos_${datosPeriodo.desde}_${datosPeriodo.hasta}.csv`, datosPeriodo.egresos, getCat)}>
+            ⬇ Egresos (Excel)
+          </button>
+        </div>
+      </div>
 
       <div className="tabs">
         {[['resumen', 'Resumen'], ['categorias', 'Egresos por categoría'], ['comparativa', 'Comparativa mensual'], ['deuda', 'Evolución de deuda']].map(([k, l]) => (
@@ -154,7 +171,7 @@ export default function Reportes() {
           <table>
             <thead><tr><th>Medio</th><th className="text-right">Monto</th><th className="text-right">% del total</th></tr></thead>
             <tbody>
-              {medioRows.map(r => <tr key={r.id}><td><span className="cat-dot" style={{ background: r.color }} />{r.label}</td><td className="text-right"><strong>{fmt(r.monto)}</strong></td><td className="text-right">{r.pct}%</td></tr>)}
+              {medioRows.filter(r => r.monto > 0).map(r => <tr key={r.id}><td><span className="cat-dot" style={{ background: r.color }} />{r.label}</td><td className="text-right"><strong>{fmt(r.monto)}</strong></td><td className="text-right">{r.pct}%</td></tr>)}
             </tbody>
           </table>
         </div>

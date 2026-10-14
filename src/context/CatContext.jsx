@@ -13,14 +13,18 @@ export const CatProvider = ({ children }) => {
   }, [])
 
   const loadCats = async () => {
-    const snap = await getDocs(collection(db, 'categorias'))
-    const extra = []
-    snap.forEach(d => {
-      if (!DEFAULT_CATS.find(c => c.id === d.id)) {
-        extra.push({ id: d.id, ...d.data() })
-      }
-    })
-    setCategorias([...DEFAULT_CATS, ...extra])
+    try {
+      const snap = await getDocs(collection(db, 'categorias'))
+      const extra = []
+      snap.forEach(d => {
+        if (!DEFAULT_CATS.find(c => c.id === d.id)) {
+          extra.push({ id: d.id, ...d.data() })
+        }
+      })
+      setCategorias([...DEFAULT_CATS, ...extra])
+    } catch {
+      // Sin permiso o sin conexión (ej. rol restringido): seguimos con las categorías por defecto
+    }
   }
 
   const addCat = async (nombre, color) => {

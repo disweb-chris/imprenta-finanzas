@@ -16,6 +16,11 @@ const Liquidacion = lazy(() => import('./views/Liquidacion'))
 const PagosVariables = lazy(() => import('./views/PagosVariables'))
 const Presupuesto = lazy(() => import('./views/Presupuesto'))
 const RentabilidadPedidos = lazy(() => import('./views/RentabilidadPedidos'))
+const Cotizaciones = lazy(() => import('./views/Cotizaciones'))
+const Calculadora = lazy(() => import('./views/Calculadora'))
+const Impuestos = lazy(() => import('./views/Impuestos'))
+const CuentasPagar = lazy(() => import('./views/CuentasPagar'))
+const Cobranza = lazy(() => import('./views/Cobranza'))
 
 const NAV_BOTTOM = [
   { to: '/finanzas/', label: 'Inicio', icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> },
@@ -32,12 +37,34 @@ const Loader = () => (
 )
 
 export default function App() {
-  const { user } = useAuth()
+  const { user, role, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = window.location.pathname
 
-  if (user === undefined) return <Loader />
+  if (user === undefined || role === undefined) return <Loader />
   if (!user) return <Login />
+
+  // Rol restringido: solo la calculadora, sin sidebar ni acceso a ninguna otra pantalla
+  // Nota: sin className="app-layout" a propósito — esa clase fija height:100vh y
+  // overflow:hidden para el layout con sidebar, y acá cortaría el scroll de la página.
+  if (role === 'gestor') {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+        <div className="mobile-header" style={{ display: 'flex', position: 'sticky', top: 0 }}>
+          <img src="https://imprentaonline.ar/wp-content/uploads/2026/02/logo-blanco.webp" alt="IO" style={{ height: 26 }} />
+          <span style={{ flex: 1, color: '#fff', fontFamily: 'var(--font-head)', fontSize: 14, fontWeight: 700 }}>Calculadora</span>
+          <button onClick={logout} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', padding: '6px 10px' }}>
+            Cerrar sesión
+          </button>
+        </div>
+        <main>
+          <Suspense fallback={<Loader />}>
+            <Calculadora />
+          </Suspense>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="app-layout">
@@ -69,6 +96,11 @@ export default function App() {
             <Route path="/finanzas/pagos-variables" element={<PagosVariables />} />
             <Route path="/finanzas/presupuesto" element={<Presupuesto />} />
             <Route path="/finanzas/rentabilidad-pedidos" element={<RentabilidadPedidos />} />
+            <Route path="/finanzas/cotizaciones" element={<Cotizaciones />} />
+            <Route path="/finanzas/calculadora" element={<Calculadora />} />
+            <Route path="/finanzas/impuestos" element={<Impuestos />} />
+            <Route path="/finanzas/cuentas-pagar" element={<CuentasPagar />} />
+            <Route path="/finanzas/cobranza" element={<Cobranza />} />
             <Route path="*" element={<Navigate to="/finanzas/" />} />
           </Routes>
         </Suspense>
