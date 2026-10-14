@@ -9,6 +9,7 @@ import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
+import { exportarVentas, exportarEgresos } from '../utils/exportar'
 
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend)
 
@@ -21,6 +22,7 @@ export default function Reportes() {
   const [chartData, setChartData] = useState(null)
   const [deudaChartData, setDeudaChartData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [datosPeriodo, setDatosPeriodo] = useState({ orders: [], egresos: [] })
 
   useEffect(() => { loadAll() }, [getPeriodDates])
   useEffect(() => { loadDeudaHistorial() }, [])
@@ -57,8 +59,10 @@ export default function Reportes() {
     const comisionMPCalc = calcularComisionMP(orders, appCfg.mp_comision_pct, realesPorMes)
     let totalEgresos = 0
     const catTotals = {}
+    const egresosPeriodo = []
     egrSnap.forEach(d => {
       const x = d.data()
+      egresosPeriodo.push(x)
       const m = parseFloat(x.monto || 0)
       totalEgresos += m
       catTotals[x.categoria] = (catTotals[x.categoria] || 0) + m
@@ -72,6 +76,7 @@ export default function Reportes() {
       else compMensual += m
     })
 
+    setDatosPeriodo({ orders, egresos: egresosPeriodo, desde: startStr, hasta: endStr })
     setResumen({
       totalIngresos, totalEgresos, compMensual, balance: totalIngresos - totalEgresos, ordenes: orders.length,
       comisionMP: comisionMPCalc.total, comisionMPTieneReal: comisionMPCalc.detalle.some(x => x.real != null),
@@ -105,7 +110,19 @@ export default function Reportes() {
 
   return (
     <div className="view">
-      <div className="view-header"><h2>Reportes</h2><p>{periodLabel()}</p></div>
+      <div className="view-header-row">
+        <div><h2>Reportes</h2><p>{periodLabel()}</p></div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} title="Planillas del período elegido para mandarle al contador">
+          <button className="btn btn-secondary btn-sm" disabled={loading}
+            onClick={() => exportarVentas(`ventas_${datosPeriodo.desde}_${datosPeriodo.hasta}.csv`, datosPeriodo.orders)}>
+            ⬇ Ventas (Excel)
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={loading}
+            onClick={() => exportarEgresos(`egresos_${datosPeriodo.desde}_${datosPeriodo.hasta}.csv`, datosPeriodo.egresos, getCat)}>
+            ⬇ Egresos (Excel)
+          </button>
+        </div>
+      </div>
 
       <div className="tabs">
         {[['resumen', 'Resumen'], ['categorias', 'Egresos por categoría'], ['comparativa', 'Comparativa mensual'], ['deuda', 'Evolución de deuda']].map(([k, l]) => (

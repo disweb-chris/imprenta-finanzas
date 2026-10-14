@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { Chart, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend } from 'chart.js'
@@ -9,6 +10,7 @@ import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
+import { loadCuentasPagar } from '../utils/cuentasPagar'
 
 Chart.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
@@ -25,6 +27,7 @@ export default function Dashboard() {
   const [orders, setOrders] = useState([])
   const [overviewData, setOverviewData] = useState(null)
   const [catData, setCatData] = useState(null)
+  const [atender, setAtender] = useState(null)
 
   useEffect(() => { loadAll() }, [getPeriodDates])
 
@@ -84,6 +87,21 @@ export default function Dashboard() {
     })
 
     setSenasActivas(senasArr)
+
+    // Para atender: deuda con proveedores y el próximo vencimiento (no depende del período elegido)
+    const cuentas = await loadCuentasPagar({ soloAbiertas: true }).catch(() => [])
+    const hoyStr = localDateStr(new Date())
+    const proximos = []
+    compSnap.forEach(d => { const c = d.data(); if (c.fecha_proximo_pago) proximos.push({ fecha: c.fecha_proximo_pago, nombre: c.nombre, monto: parseFloat(c.monto || 0) }) })
+    cuentas.forEach(c => proximos.push({ fecha: c.vencimiento, nombre: c.proveedor, monto: c.saldo }))
+    proximos.sort((a, b) => a.fecha.localeCompare(b.fecha))
+    setAtender({
+      porPagar: cuentas.reduce((s, c) => s + c.saldo, 0),
+      vencidoProv: cuentas.filter(c => c.estado === 'vencida').reduce((s, c) => s + c.saldo, 0),
+      cantCuentas: cuentas.length,
+      vencidos: proximos.filter(p => p.fecha < hoyStr).length,
+      proximo: proximos.find(p => p.fecha >= hoyStr) || null,
+    })
 
     let totalEgresos = 0
     const egrDocs = []
@@ -219,6 +237,31 @@ export default function Dashboard() {
           <div className="card-sub">{comisionMP.tieneReal ? 'incluye monto real cargado' : 'no registrada como egreso'}</div>
         </div>
       </div>
+
+      {atender && (
+        <div className="cards-grid">
+          <Link to="/finanzas/cuentas-pagar" className="stat-card" style={{ borderLeft: '4px solid var(--danger)', textDecoration: 'none', color: 'inherit' }}>
+            <div className="card-label">🧾 A pagar a proveedores</div>
+            <div className="card-value" style={{ fontSize: 20 }}>{fmt(atender.porPagar)}</div>
+            <div className="card-sub">{atender.vencidoProv > 0 ? <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{fmt(atender.vencidoProv)} vencido</span> : `${atender.cantCuentas} cuenta${atender.cantCuentas !== 1 ? 's' : ''} abierta${atender.cantCuentas !== 1 ? 's' : ''}`}</div>
+          </Link>
+          <Link to="/finanzas/impuestos" className="stat-card" style={{ borderLeft: '4px solid #8b5cf6', textDecoration: 'none', color: 'inherit' }}>
+            <div className="card-label">📅 Próximo vencimiento</div>
+            {atender.proximo
+              ? <>
+                  <div className="card-value" style={{ fontSize: 18 }}>{atender.proximo.nombre}</div>
+                  <div className="card-sub">{fmtDate(atender.proximo.fecha)} · {fmt(atender.proximo.monto)}</div>
+                </>
+              : <div className="card-value" style={{ fontSize: 18 }}>—</div>}
+            {atender.vencidos > 0 && <div className="card-sub" style={{ color: 'var(--danger)', fontWeight: 600 }}>{atender.vencidos} vencido{atender.vencidos !== 1 ? 's' : ''} sin pagar</div>}
+          </Link>
+          <Link to="/finanzas/cobranza" className="stat-card" style={{ borderLeft: '4px solid #f59e0b', textDecoration: 'none', color: 'inherit' }}>
+            <div className="card-label">📲 Cobranza</div>
+            <div className="card-value" style={{ fontSize: 18 }}>Ver saldos</div>
+            <div className="card-sub">todos los pedidos con saldo, con recordatorio por WhatsApp</div>
+          </Link>
+        </div>
+      )}
 
       {/* Trabajos con saldo pendiente */}
       {senasActivas.length > 0 && (

@@ -18,6 +18,9 @@ const Presupuesto = lazy(() => import('./views/Presupuesto'))
 const RentabilidadPedidos = lazy(() => import('./views/RentabilidadPedidos'))
 const Cotizaciones = lazy(() => import('./views/Cotizaciones'))
 const Calculadora = lazy(() => import('./views/Calculadora'))
+const Impuestos = lazy(() => import('./views/Impuestos'))
+const CuentasPagar = lazy(() => import('./views/CuentasPagar'))
+const Cobranza = lazy(() => import('./views/Cobranza'))
 
 const NAV_BOTTOM = [
   { to: '/finanzas/', label: 'Inicio', icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> },
@@ -95,6 +98,9 @@ export default function App() {
             <Route path="/finanzas/rentabilidad-pedidos" element={<RentabilidadPedidos />} />
             <Route path="/finanzas/cotizaciones" element={<Cotizaciones />} />
             <Route path="/finanzas/calculadora" element={<Calculadora />} />
+            <Route path="/finanzas/impuestos" element={<Impuestos />} />
+            <Route path="/finanzas/cuentas-pagar" element={<CuentasPagar />} />
+            <Route path="/finanzas/cobranza" element={<Cobranza />} />
             <Route path="*" element={<Navigate to="/finanzas/" />} />
           </Routes>
         </Suspense>

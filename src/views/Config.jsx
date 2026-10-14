@@ -19,7 +19,7 @@ export default function Config() {
   const [showCatModal, setShowCatModal] = useState(false)
   const [migrando, setMigrando] = useState(false)
 
-  const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '' })
+  const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '', iibb_alicuota_pct: '', iibb_dia_venc: '' })
   const [mpReales, setMpReales] = useState([])
   const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
 
@@ -27,7 +27,7 @@ export default function Config() {
   const [roleForm, setRoleForm] = useState({ email: '', rol: 'gestor' })
 
   useEffect(() => {
-    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo }))
+    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo, iibb_alicuota_pct: cfg.iibb_alicuota_pct, iibb_dia_venc: cfg.iibb_dia_venc }))
     loadMpReales()
     loadRoles()
   }, [])
@@ -67,6 +67,8 @@ export default function Config() {
     await saveAppConfig({
       mp_comision_pct: parseFloat(paramsForm.mp_comision_pct) || 0,
       monotributo_techo: parseFloat(paramsForm.monotributo_techo) || 0,
+      iibb_alicuota_pct: parseFloat(paramsForm.iibb_alicuota_pct) || 0,
+      iibb_dia_venc: Math.min(Math.max(parseInt(paramsForm.iibb_dia_venc) || 10, 1), 28),
     })
     toast('Parámetros guardados', 'success')
   }
@@ -179,6 +181,18 @@ export default function Config() {
               <label>Techo de facturación monotributo ($ / 12 meses)</label>
               <input type="number" value={paramsForm.monotributo_techo}
                 onChange={e => setParamsForm(f => ({ ...f, monotributo_techo: e.target.value }))} placeholder="Ej: 68000000" />
+            </div>
+            <div className="field-row">
+              <div className="field">
+                <label>Alícuota IIBB / AGIP (%)</label>
+                <input type="number" step="0.01" value={paramsForm.iibb_alicuota_pct}
+                  onChange={e => setParamsForm(f => ({ ...f, iibb_alicuota_pct: e.target.value }))} placeholder="4" />
+              </div>
+              <div className="field">
+                <label>Día de vencimiento AGIP</label>
+                <input type="number" min="1" max="28" value={paramsForm.iibb_dia_venc}
+                  onChange={e => setParamsForm(f => ({ ...f, iibb_dia_venc: e.target.value }))} placeholder="10" />
+              </div>
             </div>
             <button className="btn btn-primary" onClick={saveParams}>Guardar parámetros</button>
           </div>

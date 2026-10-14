@@ -60,14 +60,18 @@ export const statusBadge = (s) => {
   const labels = { completed: 'Completado', processing: 'En proceso', 'on-hold': 'En espera', cancelled: 'Cancelado', pending: 'Pendiente' }
   return { cls: map[s] || 'badge-gray', label: labels[s] || s }
 }
-// Medios de pago de egresos. "canje" = pago en especie (trabajo de Imprenta Online):
-// registra el costo pero no mueve banco ni efectivo.
+// Medios de pago de egresos. "canje" = pago en especie (trabajo de Imprenta Online).
+// "a_pagar" = costo de una cuenta corriente con el proveedor (ver utils/cuentasPagar.js).
 export const MEDIO_PAGO = {
   banco:    { label: 'Banco',    badge: 'badge-blue' },
   efectivo: { label: 'Efectivo', badge: 'badge-orange' },
   canje:    { label: 'Canje',    badge: 'badge-gray' },
+  a_pagar:  { label: 'A pagar',  badge: 'badge-yellow' },
 }
 export const medioPagoInfo = (m) => MEDIO_PAGO[m] || MEDIO_PAGO.banco
+// Egresos que registran el costo pero no sacan plata de banco ni de efectivo:
+// el canje se paga con trabajo y lo 'a_pagar' sale después, como pago de la cuenta corriente.
+export const mueveCaja = (medio) => medio !== 'canje' && medio !== 'a_pagar'
 
 // wa.me necesita el número internacional: 549 + área + número, sin 0 ni 15.
 // Los teléfonos de WooCommerce suelen venir como "11 15-3456-7890" o "011 3456-7890".
