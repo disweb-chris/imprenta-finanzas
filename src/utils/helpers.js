@@ -68,3 +68,32 @@ export const MEDIO_PAGO = {
   canje:    { label: 'Canje',    badge: 'badge-gray' },
 }
 export const medioPagoInfo = (m) => MEDIO_PAGO[m] || MEDIO_PAGO.banco
+
+// wa.me necesita el número internacional: 549 + área + número, sin 0 ni 15.
+// Los teléfonos de WooCommerce suelen venir como "11 15-3456-7890" o "011 3456-7890".
+export const waNumero = (telefono) => {
+  let d = String(telefono || '').replace(/\D/g, '')
+  if (!d) return null
+  if (d.startsWith('00')) d = d.slice(2)
+  const original = d
+  if (d.startsWith('54')) {
+    d = d.slice(2)
+    if (d.startsWith('9')) d = d.slice(1)
+  }
+  if (d.startsWith('0')) d = d.slice(1)
+  // "15" después del código de área (2 a 4 dígitos) cuando sobran 2 dígitos
+  if (d.length === 12) {
+    for (const largoArea of [2, 3, 4]) {
+      if (d.slice(largoArea, largoArea + 2) === '15') { d = d.slice(0, largoArea) + d.slice(largoArea + 2); break }
+    }
+  }
+  if (d.length === 10) return `549${d}`
+  // No parece un número argentino: si es largo, se asume que ya viene con código de país
+  return original.length >= 11 && !original.startsWith('54') ? original : null
+}
+
+export const waLink = (telefono, texto) => {
+  const n = waNumero(telefono)
+  if (!n) return null
+  return `https://wa.me/${n}` + (texto ? `?text=${encodeURIComponent(texto)}` : '')
+}
