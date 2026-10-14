@@ -62,16 +62,23 @@ export const statusBadge = (s) => {
 }
 // Medios de pago de egresos. "canje" = pago en especie (trabajo de Imprenta Online).
 // "a_pagar" = costo de una cuenta corriente con el proveedor (ver utils/cuentasPagar.js).
+// "caja_chica" = fondo propio: se repone desde banco/efectivo (movimiento interno en
+// `caja_chica_movimientos`, no es egreso) y los gastos chicos salen de ahí.
 export const MEDIO_PAGO = {
-  banco:    { label: 'Banco',    badge: 'badge-blue' },
-  efectivo: { label: 'Efectivo', badge: 'badge-orange' },
-  canje:    { label: 'Canje',    badge: 'badge-gray' },
-  a_pagar:  { label: 'A pagar',  badge: 'badge-yellow' },
+  banco:      { label: 'Banco',      badge: 'badge-blue',   color: '#2e509e' },
+  efectivo:   { label: 'Efectivo',   badge: 'badge-orange', color: '#FF6B00' },
+  caja_chica: { label: 'Caja chica', badge: 'badge-green',  color: '#10b981' },
+  canje:      { label: 'Canje',      badge: 'badge-gray',   color: '#94a3b8' },
+  a_pagar:    { label: 'A pagar',    badge: 'badge-yellow', color: '#f59e0b' },
 }
 export const medioPagoInfo = (m) => MEDIO_PAGO[m] || MEDIO_PAGO.banco
 // Egresos que registran el costo pero no sacan plata de banco ni de efectivo:
 // el canje se paga con trabajo y lo 'a_pagar' sale después, como pago de la cuenta corriente.
 export const mueveCaja = (medio) => medio !== 'canje' && medio !== 'a_pagar'
+// De qué saldo sale un egreso que mueve caja. Cualquier valor no reconocido (incl. 'tarjeta') cuenta como banco
+export const saldoDeMedio = (medio) => medio === 'efectivo' || medio === 'caja_chica' ? medio : 'banco'
+// Medios desde/hacia los que se repone o devuelve la caja chica
+export const ORIGENES_CAJA_CHICA = ['banco', 'efectivo']
 
 // wa.me necesita el número internacional: 549 + área + número, sin 0 ni 15.
 // Los teléfonos de WooCommerce suelen venir como "11 15-3456-7890" o "011 3456-7890".

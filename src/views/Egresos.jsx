@@ -53,7 +53,7 @@ export default function Egresos() {
     setLoading(false)
   }
 
-  const openNew = () => setForm({ id: '', fecha: todayStr(), monto: '', categoria: '', subcategoria: '', descripcion: '', origen_compromiso: '' })
+  const openNew = () => setForm({ id: '', fecha: todayStr(), monto: '', categoria: '', subcategoria: '', descripcion: '', origen_compromiso: '', medio_pago: 'banco' })
   const openEdit = (e) => setForm({ id: e.id, fecha: e.fecha, monto: e.monto, categoria: e.categoria, subcategoria: e.subcategoria || '', descripcion: e.descripcion || '', origen_compromiso: e.origen_compromiso || '', medio_pago: e.medio_pago || 'banco' })
 
   const save = async () => {
@@ -179,6 +179,7 @@ export default function Egresos() {
               <select value={form.medio_pago} onChange={e => setForm(f => ({ ...f, medio_pago: e.target.value }))}>
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
+                <option value="caja_chica">Caja chica</option>
                 <option value="canje">Canje (no mueve banco ni efectivo)</option>
                 {form.medio_pago === 'a_pagar' && <option value="a_pagar">A pagar (se paga desde Cuentas a pagar)</option>}
               </select>

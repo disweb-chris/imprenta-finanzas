@@ -385,6 +385,7 @@ export default function Liquidacion() {
                         style={{ border: '1.5px solid var(--border)', borderRadius: 6, padding: '5px 8px', fontSize: 12 }}>
                         <option value="banco">Banco</option>
                         <option value="efectivo">Efectivo</option>
+                        <option value="caja_chica">Caja chica</option>
                         <option value="canje">Canje</option>
                         <option value="a_pagar">A pagar (cta. cte.)</option>
                       </select>

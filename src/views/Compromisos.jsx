@@ -365,6 +365,7 @@ export default function Compromisos() {
               <select value={pagarForm.medio_pago} onChange={e => setPagarForm(f=>({...f,medio_pago:e.target.value}))}>
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
+                <option value="caja_chica">Caja chica</option>
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>

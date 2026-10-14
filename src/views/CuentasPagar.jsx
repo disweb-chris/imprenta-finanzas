@@ -280,6 +280,7 @@ export default function CuentasPagar() {
               <select value={pagoForm.medio_pago} onChange={e => setPagoForm(f => ({ ...f, medio_pago: e.target.value }))}>
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
+                <option value="caja_chica">Caja chica</option>
                 <option value="canje">Canje (no mueve banco ni efectivo)</option>
               </select>
             </div>

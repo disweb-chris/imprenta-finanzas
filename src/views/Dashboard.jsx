@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({
     vendido: 0, egresos: 0, balance: 0, compMes: 0, ordenes: 0, compItems: 0,
-    cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0
+    cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0, saldoCajaChica: 0
   })
   const [comisionMP, setComisionMP] = useState({ total: 0, tieneReal: false })
   const [senasActivas, setSenasActivas] = useState([])
@@ -121,19 +121,20 @@ export default function Dashboard() {
       }
     })
 
-    // Saldo banco y efectivo del último cierre
-    let saldoBanco = 0, saldoEfectivo = 0
+    // Saldo banco, efectivo y caja chica del último cierre
+    let saldoBanco = 0, saldoEfectivo = 0, saldoCajaChica = 0
     cierreSnap.forEach(d => {
       const c = d.data()
       saldoBanco = parseFloat(c.saldo_banco || c.saldo_final || 0)
       saldoEfectivo = parseFloat(c.saldo_efectivo || 0)
+      saldoCajaChica = parseFloat(c.saldo_caja_chica || 0)
     })
 
     setKpis({
       vendido, egresos: totalEgresos,
       balance: cobrado + ingresosExtra - totalEgresos,
       compMes, ordenes: filtrados.length, compItems,
-      cobrado, pendiente, ingresosExtra, saldoBanco, saldoEfectivo
+      cobrado, pendiente, ingresosExtra, saldoBanco, saldoEfectivo, saldoCajaChica
     })
     setOrders(filtrados.slice(0, 8))
 
@@ -229,6 +230,11 @@ export default function Dashboard() {
         <div className="stat-card" style={{ borderLeft: '4px solid #FF6B00' }}>
           <div className="card-label">💵 Efectivo</div>
           <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.saldoEfectivo)}</div>
+          <div className="card-sub">último cierre</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
+          <div className="card-label">🪙 Caja chica</div>
+          <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.saldoCajaChica)}</div>
           <div className="card-sub">último cierre</div>
         </div>
         <div className="stat-card" style={{ borderLeft: '4px solid #009ee3' }}>
