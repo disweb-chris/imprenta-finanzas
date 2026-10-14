@@ -55,6 +55,24 @@ export const DEFAULT_CATS = [
   { id: 'varios',        nombre: 'Varios',          color: '#94a3b8' },
 ]
 
+// Medios de pago de egresos. La caja chica es un fondo propio: se repone desde banco/efectivo
+// (movimiento interno en `caja_chica_movimientos`, no es egreso) y los gastos chicos salen de ahí.
+export const MEDIOS_PAGO = [
+  { id: 'banco',      label: 'Banco / Transferencia', short: 'Banco',      badge: 'badge-blue',   color: '#2e509e' },
+  { id: 'efectivo',   label: 'Efectivo',              short: 'Efectivo',   badge: 'badge-orange', color: '#FF6B00' },
+  { id: 'caja_chica', label: 'Caja chica',            short: 'Caja chica', badge: 'badge-green',  color: '#10b981' },
+]
+
+// Medios desde/hacia los que se mueve plata de la caja chica
+export const ORIGENES_CAJA_CHICA = MEDIOS_PAGO.filter(m => m.id !== 'caja_chica')
+
+export const medioInfo = (id) =>
+  MEDIOS_PAGO.find(m => m.id === id) || { id, label: id || 'Banco', short: id || 'Banco', badge: 'badge-gray', color: '#94a3b8' }
+
+// Normaliza el medio de un egreso: cualquier valor no reconocido (incl. 'tarjeta' o vacío) cuenta como banco
+export const medioEgreso = (x) =>
+  x?.medio_pago === 'efectivo' || x?.medio_pago === 'caja_chica' ? x.medio_pago : 'banco'
+
 export const statusBadge = (s) => {
   const map = { completed: 'badge-green', processing: 'badge-blue', 'on-hold': 'badge-yellow', cancelled: 'badge-red', pending: 'badge-gray' }
   const labels = { completed: 'Completado', processing: 'En proceso', 'on-hold': 'En espera', cancelled: 'Cancelado', pending: 'Pendiente' }

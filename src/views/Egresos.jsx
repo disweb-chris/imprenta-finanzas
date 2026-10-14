@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, MEDIOS_PAGO, medioInfo } from '../utils/helpers'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
@@ -53,7 +53,7 @@ export default function Egresos() {
     setLoading(false)
   }
 
-  const openNew = () => setForm({ id: '', fecha: todayStr(), monto: '', categoria: '', subcategoria: '', descripcion: '', origen_compromiso: '' })
+  const openNew = () => setForm({ id: '', fecha: todayStr(), monto: '', categoria: '', subcategoria: '', descripcion: '', origen_compromiso: '', medio_pago: 'banco' })
   const openEdit = (e) => setForm({ id: e.id, fecha: e.fecha, monto: e.monto, categoria: e.categoria, subcategoria: e.subcategoria || '', descripcion: e.descripcion || '', origen_compromiso: e.origen_compromiso || '', medio_pago: e.medio_pago || 'banco' })
 
   const save = async () => {
@@ -122,7 +122,7 @@ export default function Egresos() {
                     <td><span className="cat-dot" style={{ background: cat.color }} />{cat.nombre}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{e.subcategoria || '-'}</td>
                     <td>{e.descripcion || '-'}</td>
-                    <td><span className={`badge ${e.medio_pago === 'efectivo' ? 'badge-orange' : 'badge-blue'}`}>{e.medio_pago === 'efectivo' ? 'Efectivo' : 'Banco'}</span></td>
+                    <td><span className={`badge ${medioInfo(e.medio_pago || 'banco').badge}`}>{medioInfo(e.medio_pago || 'banco').short}</span></td>
                     <td className="text-right"><strong>{fmt(e.monto)}</strong></td>
                     <td className="text-center" style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => { openEdit(e); setShowModal(true) }}>Editar</button>
@@ -177,8 +177,7 @@ export default function Egresos() {
             <div className="field">
               <label>Medio de pago</label>
               <select value={form.medio_pago} onChange={e => setForm(f => ({ ...f, medio_pago: e.target.value }))}>
-                <option value="banco">Banco / Transferencia</option>
-                <option value="efectivo">Efectivo</option>
+                {MEDIOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </div>
             <div className="modal-footer">

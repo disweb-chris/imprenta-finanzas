@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy, limit, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, medioEgreso, medioInfo, ORIGENES_CAJA_CHICA } from '../utils/helpers'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
@@ -32,6 +32,8 @@ function getCobrosDelPeriodo(order, desde) {
   return []
 }
 
+const TIPOS_MOV_CC = { reposicion: 'Reposición', devolucion: 'Devolución' }
+
 const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
 
 export default function Caja() {
@@ -40,14 +42,17 @@ export default function Caja() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [lastCierre, setLastCierre] = useState(null)
-  const [kpis, setKpis] = useState({ saldoCierre:0, ventas:0, ingExtra:0, egresos:0, saldoActual:0, ventasBanco:0, ventasEfectivo:0, egresosBanco:0, egresosEfectivo:0, saldoBanco:0, saldoEfectivo:0, ordenes:0 })
+  const [kpis, setKpis] = useState({ saldoCierre:0, ventas:0, ingExtra:0, egresos:0, saldoActual:0, ventasBanco:0, ventasEfectivo:0, egresosBanco:0, egresosEfectivo:0, saldoBanco:0, saldoEfectivo:0, ordenes:0, egresosCajaChica:0, repoCajaChica:0, devCajaChica:0, netoCCBanco:0, netoCCEfectivo:0, saldoCajaChica:0 })
+  const [movsCajaChica, setMovsCajaChica] = useState([])
+  const [showMovCC, setShowMovCC] = useState(false)
+  const [movCCForm, setMovCCForm] = useState({ fecha:todayStr(), monto:'', tipo:'reposicion', medio:'efectivo', descripcion:'' })
   const [extraDocs, setExtraDocs] = useState([])
   const [historial, setHistorial] = useState([])
   const [proyeccion, setProyeccion] = useState(null)
   const [showCierre, setShowCierre] = useState(false)
   const [showExtra, setShowExtra] = useState(false)
   const [editExtra, setEditExtra] = useState(null)
-  const [cierreForm, setCierreForm] = useState({ saldo:'', saldo_banco:'', saldo_efectivo:'', fecha:todayStr(), notas:'' })
+  const [cierreForm, setCierreForm] = useState({ saldo:'', saldo_banco:'', saldo_efectivo:'', saldo_caja_chica:'', fecha:todayStr(), notas:'' })
   const [extraForm, setExtraForm] = useState({ fecha:todayStr(), monto:'', tipo:'credito', descripcion:'' })
   const [saldoCalc, setSaldoCalc] = useState(0)
   const [alertMsg, setAlertMsg] = useState('')
@@ -92,11 +97,19 @@ export default function Caja() {
         ? _ls(new Date(desde))
         : (()=>{ const n=new Date(desde); n.setDate(n.getDate()+1); return _ls(n) })()
 
-      const [ordNuevas, ordAntiguas, egrSnap, extraSnap] = await Promise.all([
+      // Movimientos del mismo día del cierre solo cuentan si se cargaron después del cierre
+      const posteriorAlCierre = (x) => {
+        if (!(cierre?.timestamp && x.fecha===cierre.fecha)) return true
+        const ec = x.createdAt ? new Date(x.createdAt) : null
+        return !!ec && ec > new Date(cierre.timestamp)
+      }
+
+      const [ordNuevas, ordAntiguas, egrSnap, extraSnap, ccSnap] = await Promise.all([
         fetchOrders(desde, ahora, 'completed,processing').catch(()=>[]),
         fetchOrders(new Date(desde.getTime()-60*86400000), desde, 'completed,processing,on-hold').catch(()=>[]),
         getDocs(query(collection(db,'egresos'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
         getDocs(query(collection(db,'ingresos_extra'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
+        getDocs(query(collection(db,'caja_chica_movimientos'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
       ])
 
       const ordMap = {}
@@ -118,18 +131,32 @@ export default function Caja() {
         }
       })
 
-      let egresosTotal=0, egresosBanco=0, egresosEfectivo=0
+      let egresosTotal=0, egresosBanco=0, egresosEfectivo=0, egresosCajaChica=0
+      const gastosCC=[]
       egrSnap.forEach(d => {
         const x=d.data()
-        if (cierre?.timestamp && x.fecha===cierre.fecha) {
-          const ec = x.createdAt ? new Date(x.createdAt) : null
-          const ct = new Date(cierre.timestamp)
-          if (!ec || ec<=ct) return
-        }
+        if (!posteriorAlCierre(x)) return
         const m=parseFloat(x.monto||0)
         egresosTotal+=m
-        if (x.medio_pago==='efectivo') egresosEfectivo+=m
+        const medio=medioEgreso(x)
+        if (medio==='efectivo') egresosEfectivo+=m
+        else if (medio==='caja_chica') { egresosCajaChica+=m; gastosCC.push({id:d.id,...x,tipo:'gasto'}) }
         else egresosBanco+=m
+      })
+
+      // Reposiciones/devoluciones de caja chica: transferencias internas, no cambian el saldo total
+      let repoCajaChica=0, devCajaChica=0, netoCCBanco=0, netoCCEfectivo=0
+      const movsCC=[]
+      ccSnap.forEach(d => {
+        const x={id:d.id,...d.data()}
+        if (!posteriorAlCierre(x)) return
+        movsCC.push(x)
+        const m=parseFloat(x.monto||0)
+        const netoOrigen = x.tipo==='devolucion' ? m : -m
+        if (x.tipo==='devolucion') devCajaChica+=m
+        else repoCajaChica+=m
+        if (x.medio==='efectivo') netoCCEfectivo+=netoOrigen
+        else netoCCBanco+=netoOrigen
       })
 
       let ingExtra=0
@@ -139,10 +166,13 @@ export default function Caja() {
       const saldoActual = saldoCierre+ventas+ingExtra-egresosTotal
       const sCB = cierre?.saldo_banco!=null ? parseFloat(cierre.saldo_banco) : saldoCierre
       const sCE = cierre?.saldo_efectivo!=null ? parseFloat(cierre.saldo_efectivo) : 0
-      const saldoBanco = sCB+ventasBanco+ingExtra-egresosBanco
-      const saldoEfectivo = sCE+ventasEfectivo-egresosEfectivo
+      const sCC = cierre?.saldo_caja_chica!=null ? parseFloat(cierre.saldo_caja_chica) : 0
+      const saldoBanco = sCB+ventasBanco+ingExtra-egresosBanco+netoCCBanco
+      const saldoEfectivo = sCE+ventasEfectivo-egresosEfectivo+netoCCEfectivo
+      const saldoCajaChica = sCC+repoCajaChica-devCajaChica-egresosCajaChica
 
-      setKpis({ saldoCierre, ventas, ingExtra, egresos:egresosTotal, saldoActual, ordenes:conMov.size, ventasBanco, ventasEfectivo, egresosBanco, egresosEfectivo, saldoBanco, saldoEfectivo })
+      setKpis({ saldoCierre, ventas, ingExtra, egresos:egresosTotal, saldoActual, ordenes:conMov.size, ventasBanco, ventasEfectivo, egresosBanco, egresosEfectivo, saldoBanco, saldoEfectivo, egresosCajaChica, repoCajaChica, devCajaChica, netoCCBanco, netoCCEfectivo, saldoCajaChica })
+      setMovsCajaChica([...movsCC, ...gastosCC].sort((a,b)=>(b.fecha+(b.createdAt||'')).localeCompare(a.fecha+(a.createdAt||''))))
       setExtraDocs(extras)
       setSaldoCalc(saldoActual)
 
@@ -188,14 +218,14 @@ export default function Caja() {
     setProyeccion({saldoActual,totalPendiente:total,saldoProyectado:saldoActual-total,pendientes})
   }
 
-  const openCierre=()=>{setCierreForm({saldo:Math.round(saldoCalc),saldo_banco:Math.round(kpis.saldoBanco),saldo_efectivo:Math.round(kpis.saldoEfectivo),fecha:todayStr(),notas:''});setShowCierre(true)}
+  const openCierre=()=>{setCierreForm({saldo:Math.round(saldoCalc),saldo_banco:Math.round(kpis.saldoBanco),saldo_efectivo:Math.round(kpis.saldoEfectivo),saldo_caja_chica:Math.round(kpis.saldoCajaChica),fecha:todayStr(),notas:''});setShowCierre(true)}
 
   const guardarCierre=async()=>{
     const saldo=parseFloat(cierreForm.saldo)
     if(!cierreForm.fecha||isNaN(saldo)){toast('Completá fecha y saldo','error');return}
     const ex=await getDocs(query(collection(db,'cierres_caja'),where('fecha','==',cierreForm.fecha)))
     if(!ex.empty){if(!confirm('Ya existe un cierre para esta fecha. ¿Reemplazarlo?')) return; for(const d of ex.docs) await deleteDoc(doc(db,'cierres_caja',d.id))}
-    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,notas:cierreForm.notas,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
+    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,saldo_caja_chica:parseFloat(cierreForm.saldo_caja_chica)||0,notas:cierreForm.notas,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
     await guardarSnapshotDeuda(cierreForm.fecha)
     setShowCierre(false);toast('Cierre guardado','success');loadAll()
   }
@@ -226,6 +256,18 @@ export default function Caja() {
     setShowExtra(false);toast('Ingreso guardado','success');loadAll()
   }
 
+  const openMovCC=(tipo)=>{setMovCCForm({fecha:todayStr(),monto:'',tipo,medio:'efectivo',descripcion:''});setShowMovCC(true)}
+
+  const guardarMovCC=async()=>{
+    const monto=parseFloat(movCCForm.monto)
+    if(!movCCForm.fecha||isNaN(monto)||monto<=0){toast('Completá fecha y monto','error');return}
+    if(movCCForm.tipo==='devolucion'&&monto>kpis.saldoCajaChica&&!confirm(`El monto supera el saldo estimado de caja chica (${fmt(kpis.saldoCajaChica)}). ¿Registrar igual?`)) return
+    await addDoc(collection(db,'caja_chica_movimientos'),{...movCCForm,monto,usuario:user.email,createdAt:new Date().toISOString()})
+    setShowMovCC(false);toast(movCCForm.tipo==='reposicion'?'Caja chica repuesta':'Devolución registrada','success');loadAll()
+  }
+
+  const deleteMovCC=async(id)=>{if(!confirm('¿Eliminar este movimiento de caja chica?')) return;await deleteDoc(doc(db,'caja_chica_movimientos',id));toast('Eliminado');loadAll()}
+
   const deleteExtra=async(id)=>{if(!confirm('¿Eliminar?')) return;await deleteDoc(doc(db,'ingresos_extra',id));toast('Eliminado');loadAll()}
   const deleteCierre=async(id)=>{if(!confirm('¿Eliminar este cierre?')) return;await deleteDoc(doc(db,'cierres_caja',id));toast('Eliminado');loadAll()}
   const tipoLabel={credito:'Crédito/Préstamo',transferencia:'Transferencia',devolucion:'Devolución',otro:'Otro'}
@@ -236,7 +278,11 @@ export default function Caja() {
     <div className="view">
       <div className="view-header-row">
         <div><h2>Flujo de Caja</h2><p>Saldo en tiempo real + proyección de fin de mes</p></div>
-        <div style={{display:'flex',gap:10}}>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          <button className="btn btn-secondary" onClick={()=>openMovCC('reposicion')}>
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Reponer caja chica
+          </button>
           <button className="btn btn-secondary" onClick={()=>{setEditExtra(null);setExtraForm({fecha:todayStr(),monto:'',tipo:'credito',descripcion:''});setShowExtra(true)}}>
             <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Ingreso extra
@@ -257,7 +303,7 @@ export default function Caja() {
         <div className="stat-card" style={{borderLeft:'3px solid var(--blue)',background:'linear-gradient(135deg,#eff3ff,#fff)'}}><div className="card-label">Saldo actual estimado</div><div className="card-value" style={{fontSize:22,color:kpis.saldoActual>=0?'var(--blue)':'var(--danger)'}}>{fmt(kpis.saldoActual)}</div><div className="card-sub">en cuenta ahora</div></div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12,marginBottom:20}}>
         <div style={{background:'#fff',borderRadius:10,padding:'16px 20px',boxShadow:'var(--shadow)',borderLeft:'4px solid #2e509e'}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
             <svg width="18" height="18" fill="none" stroke="#2e509e" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
@@ -265,7 +311,8 @@ export default function Caja() {
           </div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Cobros transferencia</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ventasBanco)}</span></div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Ingresos extra</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ingExtra)}</span></div>
-          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>− Egresos banco</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosBanco)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>− Egresos banco</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosBanco)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>± Caja chica</span><span style={{color:kpis.netoCCBanco>=0?'var(--success)':'var(--danger)',fontWeight:600}}>{fmt(kpis.netoCCBanco)}</span></div>
           <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>SALDO BANCO</span>
             <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoBanco>=0?'#2e509e':'var(--danger)'}}>{fmt(kpis.saldoBanco)}</span>
@@ -277,10 +324,24 @@ export default function Caja() {
             <span style={{fontFamily:'var(--font-head)',fontWeight:700,fontSize:14,color:'#FF6B00'}}>Efectivo</span>
           </div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Cobros efectivo</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ventasEfectivo)}</span></div>
-          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8,marginTop:20}}><span>− Egresos efectivo</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosEfectivo)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4,marginTop:20}}><span>− Egresos efectivo</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosEfectivo)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>± Caja chica</span><span style={{color:kpis.netoCCEfectivo>=0?'var(--success)':'var(--danger)',fontWeight:600}}>{fmt(kpis.netoCCEfectivo)}</span></div>
           <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>SALDO EFECTIVO</span>
             <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoEfectivo>=0?'#FF6B00':'var(--danger)'}}>{fmt(kpis.saldoEfectivo)}</span>
+          </div>
+        </div>
+        <div style={{background:'#fff',borderRadius:10,padding:'16px 20px',boxShadow:'var(--shadow)',borderLeft:'4px solid #10b981'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+            <svg width="18" height="18" fill="none" stroke="#10b981" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/><path d="M16 12h5v4h-5a2 2 0 0 1 0-4z"/></svg>
+            <span style={{fontFamily:'var(--font-head)',fontWeight:700,fontSize:14,color:'#10b981'}}>Caja chica</span>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Reposiciones</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.repoCajaChica)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>− Devoluciones</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.devCajaChica)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>− Gastos caja chica</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosCajaChica)}</span></div>
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>SALDO CAJA CHICA</span>
+            <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoCajaChica>=0?'#10b981':'var(--danger)'}}>{fmt(kpis.saldoCajaChica)}</span>
           </div>
         </div>
       </div>
@@ -314,6 +375,33 @@ export default function Caja() {
       )}
 
       <div className="table-card">
+        <div className="table-card-header">
+          <h3>Movimientos de caja chica</h3>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <span style={{fontSize:12,color:'var(--text-muted)'}}>Desde el último cierre</span>
+            <button className="btn btn-secondary btn-sm" onClick={()=>openMovCC('devolucion')}>Devolver sobrante</button>
+          </div>
+        </div>
+        {movsCajaChica.length===0?<div className="empty-state"><p>Sin movimientos de caja chica desde el último cierre. Los gastos se cargan en Egresos con medio "Caja chica".</p></div>:
+          <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th className="text-right">Monto</th><th className="text-center">Acciones</th></tr></thead>
+          <tbody>{movsCajaChica.map(x=>{
+            const esGasto=x.tipo==='gasto', esRepo=x.tipo==='reposicion'
+            return (
+            <tr key={(esGasto?'g':'m')+x.id}>
+              <td>{fmtDate(x.fecha)}</td>
+              <td><span className={`badge ${esGasto?'badge-red':esRepo?'badge-green':'badge-yellow'}`}>{esGasto?'Gasto':TIPOS_MOV_CC[x.tipo]||x.tipo}</span></td>
+              <td>{esGasto
+                ? <>{getCat(x.categoria).nombre}{x.descripcion?' — '+x.descripcion:''}</>
+                : <>{esRepo?'Desde ':'Hacia '}{medioInfo(x.medio).short}{x.descripcion?' — '+x.descripcion:''}</>}</td>
+              <td className="text-right"><strong style={{color:esRepo?'var(--success)':'var(--danger)'}}>{esRepo?'+':'−'}{fmt(x.monto)}</strong></td>
+              <td className="text-center">{esGasto
+                ? <span style={{fontSize:11,color:'var(--text-muted)'}}>en Egresos</span>
+                : <button className="btn btn-danger btn-sm" onClick={()=>deleteMovCC(x.id)}>×</button>}</td>
+            </tr>)
+          })}</tbody></table>}
+      </div>
+
+      <div className="table-card">
         <div className="table-card-header"><h3>Ingresos extra</h3><span style={{fontSize:12,color:'var(--text-muted)'}}>Créditos, transferencias y otros desde el último cierre</span></div>
         {extraDocs.length===0?<div className="empty-state"><p>Sin ingresos extra desde el último cierre</p></div>:
           <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th className="text-right">Monto</th><th className="text-center">Acciones</th></tr></thead>
@@ -332,7 +420,7 @@ export default function Caja() {
       <div className="table-card">
         <div className="table-card-header"><h3>Historial de cierres</h3><button className="btn btn-secondary btn-sm" onClick={loadAll}>Actualizar</button></div>
         {historial.length===0?<div className="empty-state"><p>Sin cierres registrados</p></div>:
-          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
+          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th className="text-right">Caja chica</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
           <tbody>{historial.map(c=>(
             <tr key={c.id}>
               <td><strong>{fmtDate(c.fecha)}</strong></td>
@@ -340,6 +428,7 @@ export default function Caja() {
               <td className="text-right" style={{fontFamily:'var(--font-head)',fontWeight:700,color:'var(--blue)'}}>{fmt(c.saldo_final)}</td>
               <td className="text-right" style={{fontSize:13,color:'#2e509e',fontWeight:600}}>{c.saldo_banco!=null?fmt(c.saldo_banco):'-'}</td>
               <td className="text-right" style={{fontSize:13,color:'#FF6B00',fontWeight:600}}>{c.saldo_efectivo!=null?fmt(c.saldo_efectivo):'-'}</td>
+              <td className="text-right" style={{fontSize:13,color:'#10b981',fontWeight:600}}>{c.saldo_caja_chica!=null?fmt(c.saldo_caja_chica):'-'}</td>
               <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.notas||'-'}</td>
               <td className="text-center"><button className="btn btn-danger btn-sm" onClick={()=>deleteCierre(c.id)}>×</button></td>
             </tr>
@@ -359,11 +448,35 @@ export default function Caja() {
               <div className="field"><label>Del cual, en banco ($)</label><input type="number" value={cierreForm.saldo_banco} onChange={e=>setCierreForm(f=>({...f,saldo_banco:e.target.value}))} placeholder="0"/></div>
               <div className="field"><label>Del cual, en efectivo ($)</label><input type="number" value={cierreForm.saldo_efectivo} onChange={e=>setCierreForm(f=>({...f,saldo_efectivo:e.target.value}))} placeholder="0"/></div>
             </div>
+            <div className="field"><label>Del cual, en caja chica ($)</label><input type="number" value={cierreForm.saldo_caja_chica} onChange={e=>setCierreForm(f=>({...f,saldo_caja_chica:e.target.value}))} placeholder="0"/></div>
             <div className="field"><label>Fecha del cierre</label><input type="date" value={cierreForm.fecha} onChange={e=>setCierreForm(f=>({...f,fecha:e.target.value}))}/></div>
             <div className="field"><label>Notas (opcional)</label><textarea value={cierreForm.notas} onChange={e=>setCierreForm(f=>({...f,notas:e.target.value}))} placeholder="Observaciones..."/></div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={()=>setShowCierre(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={guardarCierre}>Guardar cierre</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMovCC&&(
+        <div className="modal-overlay open" onClick={e=>e.target===e.currentTarget&&setShowMovCC(false)}>
+          <div className="modal" style={{width:420}}>
+            <div className="modal-header"><h3>{movCCForm.tipo==='reposicion'?'Reponer caja chica':'Devolver sobrante de caja chica'}</h3><button className="modal-close" onClick={()=>setShowMovCC(false)}>×</button></div>
+            <div style={{background:'#f0f4f8',borderRadius:8,padding:14,marginBottom:16,fontSize:13}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}><span style={{color:'var(--text-muted)'}}>Saldo caja chica estimado:</span><strong>{fmt(kpis.saldoCajaChica)}</strong></div>
+              <div style={{fontSize:11,color:'var(--text-muted)'}}>Es un movimiento interno: no cuenta como egreso ni cambia el saldo total.</div>
+            </div>
+            <div className="field"><label>Tipo</label><select value={movCCForm.tipo} onChange={e=>setMovCCForm(f=>({...f,tipo:e.target.value}))}><option value="reposicion">Reposición (entra plata a caja chica)</option><option value="devolucion">Devolución (sale el sobrante de caja chica)</option></select></div>
+            <div className="field-row">
+              <div className="field"><label>Fecha</label><input type="date" value={movCCForm.fecha} onChange={e=>setMovCCForm(f=>({...f,fecha:e.target.value}))}/></div>
+              <div className="field"><label>Monto ($)</label><input type="number" value={movCCForm.monto} onChange={e=>setMovCCForm(f=>({...f,monto:e.target.value}))} placeholder="0"/></div>
+            </div>
+            <div className="field"><label>{movCCForm.tipo==='reposicion'?'Sale de':'Vuelve a'}</label><select value={movCCForm.medio} onChange={e=>setMovCCForm(f=>({...f,medio:e.target.value}))}>{ORIGENES_CAJA_CHICA.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+            <div className="field"><label>Descripción (opcional)</label><textarea value={movCCForm.descripcion} onChange={e=>setMovCCForm(f=>({...f,descripcion:e.target.value}))} placeholder="Ej: Fondo semanal..."/></div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={()=>setShowMovCC(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardarMovCC}>Guardar</button>
             </div>
           </div>
         </div>

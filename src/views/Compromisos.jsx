@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr, daysUntil } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, daysUntil, MEDIOS_PAGO } from '../utils/helpers'
 import { esPedidoCobroSaldo } from '../utils/pedidos'
 import { getAppConfig } from '../utils/appConfig'
 import { useCats } from '../context/CatContext'
@@ -347,6 +347,7 @@ export default function Compromisos() {
                     style={{ padding: '7px 8px', borderRadius: 7, border: 'none', fontSize: 12 }}>
                     <option value="banco">Banco</option>
                     <option value="efectivo">Efectivo</option>
+                    <option value="caja_chica">Caja chica</option>
                     <option value="tarjeta">Tarjeta</option>
                   </select>
                   <button onClick={pagarAGIP} style={{ padding: '8px 16px', background: 'var(--orange)', border: 'none', borderRadius: 7, color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
@@ -434,8 +435,7 @@ export default function Compromisos() {
             <div className="field">
               <label>Medio de pago</label>
               <select value={pagarForm.medio_pago} onChange={e => setPagarForm(f=>({...f,medio_pago:e.target.value}))}>
-                <option value="banco">Banco / Transferencia</option>
-                <option value="efectivo">Efectivo</option>
+                {MEDIOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>

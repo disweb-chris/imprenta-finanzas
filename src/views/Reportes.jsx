@@ -4,7 +4,7 @@ import { Line } from 'react-chartjs-2'
 import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend } from 'chart.js'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, localDateStr } from '../utils/helpers'
+import { fmt, localDateStr, MEDIOS_PAGO, medioEgreso } from '../utils/helpers'
 import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils/pedidos'
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
@@ -18,6 +18,7 @@ export default function Reportes() {
   const [tab, setTab] = useState('resumen')
   const [resumen, setResumen] = useState(null)
   const [catRows, setCatRows] = useState([])
+  const [medioRows, setMedioRows] = useState([])
   const [chartData, setChartData] = useState(null)
   const [deudaChartData, setDeudaChartData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -57,11 +58,14 @@ export default function Reportes() {
     const comisionMPCalc = calcularComisionMP(orders, appCfg.mp_comision_pct, realesPorMes)
     let totalEgresos = 0
     const catTotals = {}
+    const medioTotals = {}
     egrSnap.forEach(d => {
       const x = d.data()
       const m = parseFloat(x.monto || 0)
       totalEgresos += m
       catTotals[x.categoria] = (catTotals[x.categoria] || 0) + m
+      const medio = medioEgreso(x)
+      medioTotals[medio] = (medioTotals[medio] || 0) + m
     })
     let compMensual = 0
     compSnap.forEach(d => {
@@ -76,6 +80,7 @@ export default function Reportes() {
       totalIngresos, totalEgresos, compMensual, balance: totalIngresos - totalEgresos, ordenes: orders.length,
       comisionMP: comisionMPCalc.total, comisionMPTieneReal: comisionMPCalc.detalle.some(x => x.real != null),
     })
+    setMedioRows(MEDIOS_PAGO.map(md => ({ ...md, monto: medioTotals[md.id] || 0, pct: totalEgresos > 0 ? ((medioTotals[md.id] || 0) / totalEgresos * 100).toFixed(1) : 0 })))
     setCatRows(Object.entries(catTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ cat: k, monto: v, pct: totalEgresos > 0 ? (v / totalEgresos * 100).toFixed(1) : 0 })))
 
     // 12 month chart
@@ -140,6 +145,18 @@ export default function Reportes() {
               </tbody>
             </table>
           }
+        </div>
+      )}
+
+      {tab === 'categorias' && medioRows.some(r => r.monto > 0) && (
+        <div className="table-card">
+          <div className="table-card-header"><h3>Egresos por medio de pago</h3></div>
+          <table>
+            <thead><tr><th>Medio</th><th className="text-right">Monto</th><th className="text-right">% del total</th></tr></thead>
+            <tbody>
+              {medioRows.map(r => <tr key={r.id}><td><span className="cat-dot" style={{ background: r.color }} />{r.label}</td><td className="text-right"><strong>{fmt(r.monto)}</strong></td><td className="text-right">{r.pct}%</td></tr>)}
+            </tbody>
+          </table>
         </div>
       )}
 

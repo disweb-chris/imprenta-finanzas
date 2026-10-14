@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
-import { fmt, fmtDate, todayStr } from '../utils/helpers'
+import { fmt, fmtDate, todayStr, MEDIOS_PAGO, medioInfo } from '../utils/helpers'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
@@ -358,8 +358,7 @@ export default function Liquidacion() {
                     <td>
                       <select value={l.medio_pago} onChange={e => updateLinea(i, 'medio_pago', e.target.value)}
                         style={{ border: '1.5px solid var(--border)', borderRadius: 6, padding: '5px 8px', fontSize: 12 }}>
-                        <option value="banco">Banco</option>
-                        <option value="efectivo">Efectivo</option>
+                        {MEDIOS_PAGO.map(m => <option key={m.id} value={m.id}>{m.short}</option>)}
                       </select>
                     </td>
                     <td className="text-center">
@@ -486,7 +485,7 @@ export default function Liquidacion() {
                     <td className="text-right" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmt(l.costo_calculado)}</td>
                     <td className="text-right" style={{ fontWeight: 700, color: 'var(--blue)' }}>{fmt(l.costo_ajustado)}</td>
                     <td style={{ fontSize: 12 }}>{l.proveedor}</td>
-                    <td><span className={`badge ${l.medio_pago === 'efectivo' ? 'badge-orange' : 'badge-blue'}`}>{l.medio_pago === 'efectivo' ? 'Efectivo' : 'Banco'}</span></td>
+                    <td><span className={`badge ${medioInfo(l.medio_pago || 'banco').badge}`}>{medioInfo(l.medio_pago || 'banco').short}</span></td>
                   </tr>
                 ))}
               </tbody>
