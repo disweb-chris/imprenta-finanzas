@@ -38,7 +38,7 @@ export default function Cobranza() {
       const hoy = new Date()
       const desde = new Date(hoy.getFullYear(), hoy.getMonth() - MESES_ATRAS, 1)
       const [ords, recSnap] = await Promise.all([
-        fetchOrders(desde, hoy, 'processing,completed,on-hold'),
+        fetchOrders(desde, hoy, 'pending,processing,completed,on-hold'),
         getDocs(collection(db, 'cobranza_recordatorios')),
       ])
       const rec = {}
@@ -97,7 +97,7 @@ export default function Cobranza() {
       <div className="view-header-row">
         <div>
           <h2>Cobranza</h2>
-          <p>Pedidos con saldo pendiente de los últimos {MESES_ATRAS} meses — señas sin completar y pedidos en espera de pago</p>
+          <p>Pedidos con saldo pendiente de los últimos {MESES_ATRAS} meses — señas sin completar y pedidos pendientes o en espera de pago</p>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={load}>Actualizar</button>
       </div>
