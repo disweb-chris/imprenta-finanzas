@@ -57,7 +57,7 @@ export const DEFAULT_CATS = [
 
 export const statusBadge = (s) => {
   const map = { completed: 'badge-green', processing: 'badge-blue', 'on-hold': 'badge-yellow', cancelled: 'badge-red', pending: 'badge-gray' }
-  const labels = { completed: 'Completado', processing: 'En proceso', 'on-hold': 'En espera', cancelled: 'Cancelado', pending: 'Pendiente' }
+  const labels = { completed: 'Completado', processing: 'En proceso', 'on-hold': 'En espera', cancelled: 'Cancelado', pending: 'Pendiente de pago' }
   return { cls: map[s] || 'badge-gray', label: labels[s] || s }
 }
 // Medios de pago de egresos. "canje" = pago en especie (trabajo de Imprenta Online).
