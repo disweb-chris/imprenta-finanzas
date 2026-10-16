@@ -22,12 +22,16 @@ export default function Config() {
   const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '', iibb_alicuota_pct: '', iibb_dia_venc: '' })
   const [mpReales, setMpReales] = useState([])
   const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
+  const [avealmaDesc, setAvealmaDesc] = useState([])
 
   const [roles, setRoles] = useState([])
   const [roleForm, setRoleForm] = useState({ email: '', rol: 'gestor' })
 
   useEffect(() => {
-    getAppConfig().then(cfg => setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo, iibb_alicuota_pct: cfg.iibb_alicuota_pct, iibb_dia_venc: cfg.iibb_dia_venc }))
+    getAppConfig().then(cfg => {
+      setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo, iibb_alicuota_pct: cfg.iibb_alicuota_pct, iibb_dia_venc: cfg.iibb_dia_venc })
+      setAvealmaDesc(cfg.avealma_descuentos || [])
+    })
     loadMpReales()
     loadRoles()
   }, [])
@@ -71,6 +75,17 @@ export default function Config() {
       iibb_dia_venc: Math.min(Math.max(parseInt(paramsForm.iibb_dia_venc) || 10, 1), 28),
     })
     toast('Parámetros guardados', 'success')
+  }
+
+  const updateAvealmaDesc = (i, field, value) => setAvealmaDesc(prev => prev.map((d, j) => j === i ? { ...d, [field]: value } : d))
+
+  const saveAvealmaDesc = async () => {
+    const lista = avealmaDesc
+      .map(d => ({ nombre: (d.nombre || '').trim(), pct: parseFloat(d.pct) || 0 }))
+      .filter(d => d.nombre)
+    await saveAppConfig({ avealma_descuentos: lista })
+    setAvealmaDesc(lista)
+    toast('Descuentos de Avealma guardados', 'success')
   }
 
   const guardarMp = async () => {
@@ -221,6 +236,33 @@ export default function Config() {
               </div>
             ))
           }
+        </div>
+      </div>
+
+      {/* Avealma */}
+      <div className="table-card">
+        <div className="table-card-header">
+          <h3>Avealma — descuentos sobre lo facturado</h3>
+          <button className="btn btn-secondary btn-sm" onClick={() => setAvealmaDesc(prev => [...prev, { nombre: '', pct: '' }])}>+ Agregar</button>
+        </div>
+        <div style={{ padding: '16px 20px' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Porcentajes que se descuentan del monto que factura Avealma. Se usan al registrar una liquidación en Caja.
+            Si el monto facturado ya incluye el IVA, el 21% de IVA equivale a cargar 17,36%.
+          </p>
+          {avealmaDesc.length === 0 && <div className="empty-state"><p>Sin descuentos cargados</p></div>}
+          {avealmaDesc.map((d, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <input value={d.nombre} onChange={e => updateAvealmaDesc(i, 'nombre', e.target.value)} placeholder="Ej: Ganancias" style={{ flex: 1 }} />
+              <input type="number" step="0.01" value={d.pct} onChange={e => updateAvealmaDesc(i, 'pct', e.target.value)} placeholder="%" style={{ width: 90 }} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>%</span>
+              <button className="btn btn-danger btn-sm" onClick={() => setAvealmaDesc(prev => prev.filter((_, j) => j !== i))}>×</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+            <span style={{ fontSize: 13 }}>Total: <strong>{avealmaDesc.reduce((s, d) => s + (parseFloat(d.pct) || 0), 0).toFixed(2)}%</strong></span>
+            <button className="btn btn-primary" onClick={saveAvealmaDesc}>Guardar descuentos</button>
+          </div>
         </div>
       </div>
 

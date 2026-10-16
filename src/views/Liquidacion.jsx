@@ -386,6 +386,7 @@ export default function Liquidacion() {
                         <option value="banco">Banco</option>
                         <option value="efectivo">Efectivo</option>
                         <option value="caja_chica">Caja chica</option>
+                        <option value="avealma">Avealma</option>
                         <option value="canje">Canje</option>
                         <option value="a_pagar">A pagar (cta. cte.)</option>
                       </select>

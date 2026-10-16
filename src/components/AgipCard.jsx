@@ -61,6 +61,7 @@ export default function AgipCard({ agip, onPagado }) {
                 <option value="banco">Banco</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="caja_chica">Caja chica</option>
+                <option value="avealma">Avealma</option>
                 <option value="tarjeta">Tarjeta</option>
               </select>
               <button onClick={pagar} disabled={guardando} style={{ padding: '8px 16px', background: 'var(--orange)', border: 'none', borderRadius: 7, color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>

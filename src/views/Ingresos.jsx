@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, statusBadge } from '../utils/helpers'
-import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
+import { esPedidoCobroSaldo, getIngresoReal, cobradoAvealma } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
 
 function getTiposPago(order) {
@@ -16,7 +16,7 @@ export default function Ingresos() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('completed')
-  const [kpis, setKpis] = useState({ total: 0, avg: 0, shipping: 0, count: 0 })
+  const [kpis, setKpis] = useState({ total: 0, avg: 0, shipping: 0, count: 0, avealma: 0, countAvealma: 0 })
 
   useEffect(() => { load() }, [getPeriodDates, status])
 
@@ -30,7 +30,9 @@ export default function Ingresos() {
 
     const total = filtrados.reduce((s, o) => s + getIngresoReal(o), 0)
     const shipping = filtrados.reduce((s, o) => s + parseFloat(o.shipping_total || 0), 0)
-    setKpis({ total, avg: filtrados.length ? total / filtrados.length : 0, shipping, count: filtrados.length })
+    const conAvealma = filtrados.filter(o => cobradoAvealma(o) > 0)
+    const avealma = conAvealma.reduce((s, o) => s + cobradoAvealma(o), 0)
+    setKpis({ total, avg: filtrados.length ? total / filtrados.length : 0, shipping, count: filtrados.length, avealma, countAvealma: conAvealma.length })
     setOrders(filtrados)
     setLoading(false)
   }
@@ -39,10 +41,11 @@ export default function Ingresos() {
     <div className="view">
       <div className="view-header"><h2>Ingresos</h2><p>Órdenes de WooCommerce — {periodLabel()}</p></div>
 
-      <div className="cards-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
+      <div className="cards-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
         <div className="stat-card card-blue"><div className="card-label">Total período</div><div className="card-value">{fmt(kpis.total)}</div><div className="card-sub">{kpis.count} órdenes</div></div>
         <div className="stat-card card-green"><div className="card-label">Ticket promedio</div><div className="card-value">{fmt(kpis.avg)}</div></div>
         <div className="stat-card card-orange"><div className="card-label">Envíos</div><div className="card-value">{fmt(kpis.shipping)}</div></div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #7c3aed' }}><div className="card-label">Depositado en Avealma</div><div className="card-value">{fmt(kpis.avealma)}</div><div className="card-sub">{kpis.countAvealma} órdenes</div></div>
       </div>
 
       <div className="filters">
@@ -82,6 +85,7 @@ export default function Ingresos() {
                     const totalOriginal = parseFloat(o.total || 0)
                     const tieneHistorial = Array.isArray(o.io_pagos_historial) && o.io_pagos_historial.length > 0
                     const tipos = getTiposPago(o)
+                    const enAvealma = cobradoAvealma(o)
                     return (
                       <tr key={o.id}>
                         <td><strong>#{o.number}</strong></td>
@@ -114,6 +118,7 @@ export default function Ingresos() {
                                   {t === 'seña' ? '🟡 Seña' : t === 'saldo' ? '🟢 Saldo' : '✅ Completo'}
                                 </span>
                               ))}
+                              {enAvealma > 0 && <span className="badge badge-purple" title={`${fmt(enAvealma)} depositado en la cuenta de Avealma`}>Avealma</span>}
                             </div>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>

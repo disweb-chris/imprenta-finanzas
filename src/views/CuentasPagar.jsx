@@ -281,6 +281,7 @@ export default function CuentasPagar() {
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="caja_chica">Caja chica</option>
+                <option value="avealma">Avealma</option>
                 <option value="canje">Canje (no mueve banco ni efectivo)</option>
               </select>
             </div>
