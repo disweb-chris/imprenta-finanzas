@@ -366,6 +366,7 @@ export default function Compromisos() {
                 <option value="banco">Banco / Transferencia</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="caja_chica">Caja chica</option>
+                <option value="avealma">Avealma</option>
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>

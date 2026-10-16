@@ -8,6 +8,12 @@ export const DEFAULT_APP_CONFIG = {
   monotributo_techo: 0,
   iibb_alicuota_pct: 4,
   iibb_dia_venc: 10,
+  // Descuentos que aplica Avealma sobre lo que factura, en % del monto facturado
+  avealma_descuentos: [
+    { nombre: 'IVA', pct: 0 },
+    { nombre: 'IIBB', pct: 0 },
+    { nombre: 'Ganancias', pct: 0 },
+  ],
 }
 
 export async function getAppConfig() {

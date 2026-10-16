@@ -19,6 +19,21 @@ export function getIngresoReal(order) {
   return parseFloat(order.total || 0)
 }
 
+// Cuenta a la que entró un cobro del historial de pagos, según el método cargado en el
+// metabox «Registro de Pagos» o en el mostrador (io-punto-venta).
+export function medioCobro(metodo) {
+  const m = String(metodo || '').toLowerCase()
+  if (m === 'efectivo') return 'efectivo'
+  if (m.includes('avealma')) return 'avealma'
+  return 'banco'
+}
+
+// Total cobrado de un pedido por depósitos en la cuenta de Avealma
+export function cobradoAvealma(order) {
+  const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
+  return hist.filter(p => medioCobro(p.metodo) === 'avealma').reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
+}
+
 export function esPedidoMercadoPago(order) {
   const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
   return pm.includes('mercadopago') || pm.includes('mercado pago') || pm.includes('mercado_pago')
