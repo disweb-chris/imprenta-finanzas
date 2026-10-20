@@ -25,13 +25,31 @@ export function medioCobro(metodo) {
   const m = String(metodo || '').toLowerCase()
   if (m === 'efectivo') return 'efectivo'
   if (m.includes('avealma')) return 'avealma'
-  return 'banco'
+  return 'banco' // transferencia, Mercado Pago y GetNet se acreditan en el banco
 }
 
 // Total cobrado de un pedido por depósitos en la cuenta de Avealma
 export function cobradoAvealma(order) {
   const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
   return hist.filter(p => medioCobro(p.metodo) === 'avealma').reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
+}
+
+// Total cobrado de un pedido con GetNet: los cobros del historial con método GetNet o, si el pedido
+// no tiene historial, el total cuando la pasarela de pago del pedido es GetNet.
+export function cobradoGetnet(order) {
+  const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
+  if (hist.length) {
+    return hist.filter(p => String(p.metodo || '').toLowerCase().includes('getnet')).reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
+  }
+  const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
+  return pm.includes('getnet') ? parseFloat(order.total || 0) : 0
+}
+
+// Estima la comisión de GetNet aplicando la suma de los % de Configuración a lo cobrado con GetNet
+export function calcularComisionGetnet(orders, comisiones = []) {
+  const pct = comisiones.reduce((s, c) => s + (parseFloat(c.pct) || 0), 0)
+  const base = orders.reduce((s, o) => s + cobradoGetnet(o), 0)
+  return { base, pct, total: base * pct / 100 }
 }
 
 export function esPedidoMercadoPago(order) {

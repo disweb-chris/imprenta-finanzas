@@ -14,6 +14,11 @@ export const DEFAULT_APP_CONFIG = {
     { nombre: 'IIBB', pct: 0 },
     { nombre: 'Ganancias', pct: 0 },
   ],
+  // Comisiones que retiene GetNet sobre cada cobro, en %
+  getnet_comisiones: [
+    { nombre: 'Arancel', pct: 0 },
+    { nombre: 'IVA sobre arancel', pct: 0 },
+  ],
 }
 
 export async function getAppConfig() {

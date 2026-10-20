@@ -6,6 +6,7 @@ import { useToast } from '../components/Toast'
 import { saveWCConfig, getWCConfig, wcFetch } from '../utils/woocommerce'
 import { getAppConfig, saveAppConfig } from '../utils/appConfig'
 import { DEFAULT_CATS, fmt } from '../utils/helpers'
+import ListaPorcentajes from '../components/ListaPorcentajes'
 
 const mesActual = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
@@ -22,7 +23,7 @@ export default function Config() {
   const [paramsForm, setParamsForm] = useState({ mp_comision_pct: '', monotributo_techo: '', iibb_alicuota_pct: '', iibb_dia_venc: '' })
   const [mpReales, setMpReales] = useState([])
   const [mpForm, setMpForm] = useState({ mes: mesActual(), monto: '' })
-  const [avealmaDesc, setAvealmaDesc] = useState([])
+  const [porcentajes, setPorcentajes] = useState(null)
 
   const [roles, setRoles] = useState([])
   const [roleForm, setRoleForm] = useState({ email: '', rol: 'gestor' })
@@ -30,7 +31,7 @@ export default function Config() {
   useEffect(() => {
     getAppConfig().then(cfg => {
       setParamsForm({ mp_comision_pct: cfg.mp_comision_pct, monotributo_techo: cfg.monotributo_techo, iibb_alicuota_pct: cfg.iibb_alicuota_pct, iibb_dia_venc: cfg.iibb_dia_venc })
-      setAvealmaDesc(cfg.avealma_descuentos || [])
+      setPorcentajes({ avealma_descuentos: cfg.avealma_descuentos, getnet_comisiones: cfg.getnet_comisiones })
     })
     loadMpReales()
     loadRoles()
@@ -75,17 +76,6 @@ export default function Config() {
       iibb_dia_venc: Math.min(Math.max(parseInt(paramsForm.iibb_dia_venc) || 10, 1), 28),
     })
     toast('Parámetros guardados', 'success')
-  }
-
-  const updateAvealmaDesc = (i, field, value) => setAvealmaDesc(prev => prev.map((d, j) => j === i ? { ...d, [field]: value } : d))
-
-  const saveAvealmaDesc = async () => {
-    const lista = avealmaDesc
-      .map(d => ({ nombre: (d.nombre || '').trim(), pct: parseFloat(d.pct) || 0 }))
-      .filter(d => d.nombre)
-    await saveAppConfig({ avealma_descuentos: lista })
-    setAvealmaDesc(lista)
-    toast('Descuentos de Avealma guardados', 'success')
   }
 
   const guardarMp = async () => {
@@ -239,32 +229,18 @@ export default function Config() {
         </div>
       </div>
 
-      {/* Avealma */}
-      <div className="table-card">
-        <div className="table-card-header">
-          <h3>Avealma — descuentos sobre lo facturado</h3>
-          <button className="btn btn-secondary btn-sm" onClick={() => setAvealmaDesc(prev => [...prev, { nombre: '', pct: '' }])}>+ Agregar</button>
-        </div>
-        <div style={{ padding: '16px 20px' }}>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            Porcentajes que se descuentan del monto que factura Avealma. Se usan al registrar una liquidación en Caja.
-            Si el monto facturado ya incluye el IVA, el 21% de IVA equivale a cargar 17,36%.
-          </p>
-          {avealmaDesc.length === 0 && <div className="empty-state"><p>Sin descuentos cargados</p></div>}
-          {avealmaDesc.map((d, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <input value={d.nombre} onChange={e => updateAvealmaDesc(i, 'nombre', e.target.value)} placeholder="Ej: Ganancias" style={{ flex: 1 }} />
-              <input type="number" step="0.01" value={d.pct} onChange={e => updateAvealmaDesc(i, 'pct', e.target.value)} placeholder="%" style={{ width: 90 }} />
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>%</span>
-              <button className="btn btn-danger btn-sm" onClick={() => setAvealmaDesc(prev => prev.filter((_, j) => j !== i))}>×</button>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-            <span style={{ fontSize: 13 }}>Total: <strong>{avealmaDesc.reduce((s, d) => s + (parseFloat(d.pct) || 0), 0).toFixed(2)}%</strong></span>
-            <button className="btn btn-primary" onClick={saveAvealmaDesc}>Guardar descuentos</button>
-          </div>
-        </div>
-      </div>
+      {porcentajes && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+        <ListaPorcentajes
+          titulo="Avealma — descuentos sobre lo facturado"
+          descripcion="Porcentajes que se descuentan del monto que factura Avealma. Se usan al registrar una liquidación en Caja. Si el monto facturado ya incluye el IVA, el 21% de IVA equivale a cargar 17,36%."
+          configKey="avealma_descuentos" inicial={porcentajes.avealma_descuentos}
+          placeholder="Ej: Ganancias" vacio="Sin descuentos cargados" mensajeGuardado="Descuentos de Avealma guardados" />
+        <ListaPorcentajes
+          titulo="GetNet — comisiones"
+          descripcion="Porcentajes que GetNet retiene sobre cada cobro (arancel, IVA del arancel, retenciones, etc.). Con esto se estima la comisión en Dashboard y Reportes."
+          configKey="getnet_comisiones" inicial={porcentajes.getnet_comisiones}
+          placeholder="Ej: Arancel" vacio="Sin comisiones cargadas" mensajeGuardado="Comisiones de GetNet guardadas" />
+      </div>}
 
       {/* Accesos por rol */}
       <div className="table-card">

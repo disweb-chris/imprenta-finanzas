@@ -6,7 +6,7 @@ import { Chart, CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Leg
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, statusBadge, localDateStr } from '../utils/helpers'
-import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils/pedidos'
+import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP, calcularComisionGetnet } from '../utils/pedidos'
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
@@ -23,6 +23,7 @@ export default function Dashboard() {
     cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0, saldoCajaChica: 0, saldoAvealma: 0
   })
   const [comisionMP, setComisionMP] = useState({ total: 0, tieneReal: false })
+  const [comisionGetnet, setComisionGetnet] = useState({ base: 0, pct: 0, total: 0 })
   const [senasActivas, setSenasActivas] = useState([])
   const [orders, setOrders] = useState([])
   const [overviewData, setOverviewData] = useState(null)
@@ -55,6 +56,7 @@ export default function Dashboard() {
     mpRealesSnap.forEach(d => { realesPorMes[d.id] = parseFloat(d.data().monto || 0) })
     const comisionMPCalc = calcularComisionMP(filtrados, appCfg.mp_comision_pct, realesPorMes)
     setComisionMP({ total: comisionMPCalc.total, tieneReal: comisionMPCalc.detalle.some(x => x.real != null) })
+    setComisionGetnet(calcularComisionGetnet(filtrados, appCfg.getnet_comisiones))
 
     // Vendido: valor total de los pedidos del período (independiente de lo cobrado)
     const vendido = filtrados.reduce((s, o) => s + parseFloat(o.total || 0), 0)
@@ -248,6 +250,13 @@ export default function Dashboard() {
           <div className="card-value" style={{ fontSize: 20 }}>{fmt(comisionMP.total)}</div>
           <div className="card-sub">{comisionMP.tieneReal ? 'incluye monto real cargado' : 'no registrada como egreso'}</div>
         </div>
+        {comisionGetnet.base > 0 && (
+          <div className="stat-card" style={{ borderLeft: '4px solid #e30613' }}>
+            <div className="card-label">💳 Comisión GetNet estimada</div>
+            <div className="card-value" style={{ fontSize: 20 }}>{fmt(comisionGetnet.total)}</div>
+            <div className="card-sub">{comisionGetnet.pct ? `${comisionGetnet.pct.toFixed(2)}% de ${fmt(comisionGetnet.base)} cobrado` : 'cargá los % en Configuración'}</div>
+          </div>
+        )}
       </div>
 
       {atender && (
