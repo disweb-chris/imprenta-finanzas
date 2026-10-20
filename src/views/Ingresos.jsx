@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, statusBadge } from '../utils/helpers'
-import { esPedidoCobroSaldo, getIngresoReal, cobradoAvealma } from '../utils/pedidos'
+import { esPedidoCobroSaldo, getIngresoReal, cobradoAvealma, cobradoGetnet } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
 
 function getTiposPago(order) {
@@ -16,7 +16,7 @@ export default function Ingresos() {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('completed')
-  const [kpis, setKpis] = useState({ total: 0, avg: 0, shipping: 0, count: 0, avealma: 0, countAvealma: 0 })
+  const [kpis, setKpis] = useState({ total: 0, avg: 0, shipping: 0, count: 0, avealma: 0, countAvealma: 0, getnet: 0, countGetnet: 0 })
 
   useEffect(() => { load() }, [getPeriodDates, status])
 
@@ -32,7 +32,9 @@ export default function Ingresos() {
     const shipping = filtrados.reduce((s, o) => s + parseFloat(o.shipping_total || 0), 0)
     const conAvealma = filtrados.filter(o => cobradoAvealma(o) > 0)
     const avealma = conAvealma.reduce((s, o) => s + cobradoAvealma(o), 0)
-    setKpis({ total, avg: filtrados.length ? total / filtrados.length : 0, shipping, count: filtrados.length, avealma, countAvealma: conAvealma.length })
+    const conGetnet = filtrados.filter(o => cobradoGetnet(o) > 0)
+    const getnet = conGetnet.reduce((s, o) => s + cobradoGetnet(o), 0)
+    setKpis({ total, avg: filtrados.length ? total / filtrados.length : 0, shipping, count: filtrados.length, avealma, countAvealma: conAvealma.length, getnet, countGetnet: conGetnet.length })
     setOrders(filtrados)
     setLoading(false)
   }
@@ -46,6 +48,7 @@ export default function Ingresos() {
         <div className="stat-card card-green"><div className="card-label">Ticket promedio</div><div className="card-value">{fmt(kpis.avg)}</div></div>
         <div className="stat-card card-orange"><div className="card-label">Envíos</div><div className="card-value">{fmt(kpis.shipping)}</div></div>
         <div className="stat-card" style={{ borderLeft: '4px solid #7c3aed' }}><div className="card-label">Depositado en Avealma</div><div className="card-value">{fmt(kpis.avealma)}</div><div className="card-sub">{kpis.countAvealma} órdenes</div></div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #e30613' }}><div className="card-label">Cobrado con GetNet</div><div className="card-value">{fmt(kpis.getnet)}</div><div className="card-sub">{kpis.countGetnet} órdenes</div></div>
       </div>
 
       <div className="filters">
@@ -86,6 +89,7 @@ export default function Ingresos() {
                     const tieneHistorial = Array.isArray(o.io_pagos_historial) && o.io_pagos_historial.length > 0
                     const tipos = getTiposPago(o)
                     const enAvealma = cobradoAvealma(o)
+                    const enGetnet = cobradoGetnet(o)
                     return (
                       <tr key={o.id}>
                         <td><strong>#{o.number}</strong></td>
@@ -119,7 +123,10 @@ export default function Ingresos() {
                                 </span>
                               ))}
                               {enAvealma > 0 && <span className="badge badge-purple" title={`${fmt(enAvealma)} depositado en la cuenta de Avealma`}>Avealma</span>}
+                              {enGetnet > 0 && <span className="badge badge-red" title={`${fmt(enGetnet)} cobrado con GetNet`}>GetNet</span>}
                             </div>
+                          ) : enGetnet > 0 ? (
+                            <span className="badge badge-red">GetNet</span>
                           ) : (
                             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
                           )}

@@ -5,7 +5,7 @@ import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Filler, T
 import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, localDateStr, MEDIO_PAGO } from '../utils/helpers'
-import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP } from '../utils/pedidos'
+import { esPedidoCobroSaldo, getIngresoReal, calcularComisionMP, calcularComisionGetnet } from '../utils/pedidos'
 import { getAppConfig } from '../utils/appConfig'
 import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
@@ -84,6 +84,7 @@ export default function Reportes() {
     setResumen({
       totalIngresos, totalEgresos, compMensual, balance: totalIngresos - totalEgresos, ordenes: orders.length,
       comisionMP: comisionMPCalc.total, comisionMPTieneReal: comisionMPCalc.detalle.some(x => x.real != null),
+      comisionGetnet: calcularComisionGetnet(orders, appCfg.getnet_comisiones),
     })
     setMedioRows(Object.entries(MEDIO_PAGO).map(([id, md]) => ({ id, ...md, monto: medioTotals[id] || 0, pct: totalEgresos > 0 ? ((medioTotals[id] || 0) / totalEgresos * 100).toFixed(1) : 0 })))
     setCatRows(Object.entries(catTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ cat: k, monto: v, pct: totalEgresos > 0 ? (v / totalEgresos * 100).toFixed(1) : 0 })))
@@ -145,6 +146,13 @@ export default function Reportes() {
             <div className="card-label">💳 Comisión MP {resumen.comisionMPTieneReal ? '' : 'estimada'}</div>
             <div className="card-value" style={{ fontSize: 20 }}>{fmt(resumen.comisionMP)}</div>
           </div>
+          {resumen.comisionGetnet.base > 0 && (
+            <div className="stat-card" style={{ borderLeft: '4px solid #e30613' }}>
+              <div className="card-label">💳 Comisión GetNet estimada</div>
+              <div className="card-value" style={{ fontSize: 20 }}>{fmt(resumen.comisionGetnet.total)}</div>
+              <div className="card-sub">{resumen.comisionGetnet.pct ? `${resumen.comisionGetnet.pct.toFixed(2)}% de ${fmt(resumen.comisionGetnet.base)}` : 'cargá los % en Configuración'}</div>
+            </div>
+          )}
         </div>
       )}
 
