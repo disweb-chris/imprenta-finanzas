@@ -367,6 +367,7 @@ export default function Compromisos() {
                 <option value="efectivo">Efectivo</option>
                 <option value="caja_chica">Caja chica</option>
                 <option value="avealma">Avealma</option>
+                <option value="getnet">GetNet</option>
                 <option value="tarjeta">Tarjeta</option>
               </select>
             </div>

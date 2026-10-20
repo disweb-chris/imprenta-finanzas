@@ -181,6 +181,7 @@ export default function Egresos() {
                 <option value="efectivo">Efectivo</option>
                 <option value="caja_chica">Caja chica</option>
                 <option value="avealma">Avealma</option>
+                <option value="getnet">GetNet</option>
                 <option value="canje">Canje (no mueve banco ni efectivo)</option>
                 {form.medio_pago === 'a_pagar' && <option value="a_pagar">A pagar (se paga desde Cuentas a pagar)</option>}
               </select>
