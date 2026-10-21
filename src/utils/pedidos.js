@@ -9,14 +9,25 @@ export function esPedidoCobroSaldo(order) {
   )
 }
 
+// Pedido pagado online desde la web: pasarela de Mercado Pago o GetNet con el pago confirmado
+// por WooCommerce (fecha de pago o id de transacción) y en un estado que no sea de espera.
+const ESTADOS_SIN_COBRAR = ['pending', 'on-hold', 'failed', 'cancelled']
+export function pagadoOnline(order) {
+  if (ESTADOS_SIN_COBRAR.includes(order.status)) return false
+  const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
+  const pasarela = pm.includes('mercadopago') || pm.includes('mercado pago') || pm.includes('mercado_pago') || pm.includes('getnet')
+  return pasarela && !!(order.date_paid || order.transaction_id)
+}
+
 // Ingreso real de un pedido: si tiene historial de pagos del metabox, usamos la suma
-// de esos montos (evita distorsión por señas/descuentos); si no, el total del pedido.
+// de esos montos (evita distorsión por señas/descuentos). Sin historial, solo se da por
+// cobrado el total si se pagó online; si no, no hay nada cobrado todavía.
 export function getIngresoReal(order) {
   const historial = order.io_pagos_historial
   if (Array.isArray(historial) && historial.length > 0) {
     return historial.reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
   }
-  return parseFloat(order.total || 0)
+  return pagadoOnline(order) ? parseFloat(order.total || 0) : 0
 }
 
 // Cuenta a la que entró un cobro del historial de pagos, según el método cargado en el
@@ -35,14 +46,14 @@ export function cobradoAvealma(order) {
 }
 
 // Total cobrado de un pedido con GetNet: los cobros del historial con método GetNet o, si el pedido
-// no tiene historial, el total cuando la pasarela de pago del pedido es GetNet.
+// no tiene historial, el total cuando se pagó online con la pasarela de GetNet.
 export function cobradoGetnet(order) {
   const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
   if (hist.length) {
     return hist.filter(p => String(p.metodo || '').toLowerCase().includes('getnet')).reduce((s, p) => s + (parseFloat(p.monto) || 0), 0)
   }
   const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
-  return pm.includes('getnet') ? parseFloat(order.total || 0) : 0
+  return pm.includes('getnet') && pagadoOnline(order) ? parseFloat(order.total || 0) : 0
 }
 
 // Estima la comisión de GetNet aplicando la suma de los % de Configuración a lo cobrado con GetNet
@@ -77,13 +88,11 @@ export function calcularComisionMP(orders, tasaPct, realesPorMes = {}) {
   return { total, detalle }
 }
 
-// Saldo pendiente de un pedido. Con historial de pagos (metabox de cobros) es total − cobrado.
-// Sin historial: pendiente de pago (pending) y en espera (on-hold) se consideran todo pendiente;
-// el resto se asume cobrado.
-const ESTADOS_SIN_COBRAR = ['pending', 'on-hold']
+// Saldo pendiente de un pedido: total − cobrado. Sin historial de pagos (metabox de cobros),
+// solo los pedidos pagados online se consideran cobrados.
 export function saldoPedido(o) {
   const total = parseFloat(o.total || 0)
   const tieneHistorial = Array.isArray(o.io_pagos_historial) && o.io_pagos_historial.length > 0
-  const cobrado = tieneHistorial ? getIngresoReal(o) : (ESTADOS_SIN_COBRAR.includes(o.status) ? 0 : total)
+  const cobrado = getIngresoReal(o)
   return { total, cobrado, saldo: total - cobrado, sinPagos: !tieneHistorial }
 }

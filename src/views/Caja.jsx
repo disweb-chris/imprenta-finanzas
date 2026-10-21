@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext'
 import { getAppConfig } from '../utils/appConfig'
 import { calcAgip } from '../utils/impuestos'
 import { loadCuentasPagar } from '../utils/cuentasPagar'
-import { medioCobro } from '../utils/pedidos'
+import { medioCobro, pagadoOnline } from '../utils/pedidos'
 
 // Parsear fecha del historial: "27/04/2026 13:45" -> Date
 function parseFechaHistorial(s) {
@@ -29,9 +29,9 @@ function getCobrosDelPeriodo(order, desde) {
       .filter(p => { const f = parseFechaHistorial(p.fecha); return f && f > desde })
       .map(p => ({ monto: parseFloat(p.monto||0), medio: medioCobro(p.metodo), fecha: p.fecha, numero: order.number }))
   }
-  if (new Date(order.date_created) > desde) {
-    const pm = order.payment_method||''
-    return [{ monto: parseFloat(order.total||0), medio: pm==='cod'?'efectivo':'banco', numero: order.number }]
+  // Sin historial solo cuentan los pagos online; el resto entra cuando se carga en el metabox
+  if (pagadoOnline(order) && new Date(order.date_paid || order.date_created) > desde) {
+    return [{ monto: parseFloat(order.total||0), medio: 'banco', numero: order.number }]
   }
   return []
 }
