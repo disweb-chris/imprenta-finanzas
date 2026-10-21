@@ -72,10 +72,10 @@ export default function Dashboard() {
       const totalPedido = parseFloat(o.total || 0)
       cobrado += montoCobrado
 
+      const saldo = totalPedido - montoCobrado
+      if (saldo > 0) pendiente += saldo
       if (historial.length > 0) {
-        const saldo = totalPedido - montoCobrado
         if (saldo > 0) {
-          pendiente += saldo
           senasArr.push({
             id: o.id,
             number: o.number,
@@ -338,8 +338,7 @@ export default function Dashboard() {
               <tbody>
                 {orders.map(o => {
                   const { cls, label } = statusBadge(o.status)
-                  const h = o.io_pagos_historial || []
-                  const totalMostrar = h.length > 0 ? h.reduce((a, p) => a + (parseFloat(p.monto) || 0), 0) : parseFloat(o.total || 0)
+                  const totalMostrar = getIngresoReal(o)
                   return (
                     <tr key={o.id}>
                       <td>#{o.number}</td>

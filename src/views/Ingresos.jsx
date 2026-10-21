@@ -86,7 +86,6 @@ export default function Ingresos() {
                     const { cls, label } = statusBadge(o.status)
                     const ingresoReal = getIngresoReal(o)
                     const totalOriginal = parseFloat(o.total || 0)
-                    const tieneHistorial = Array.isArray(o.io_pagos_historial) && o.io_pagos_historial.length > 0
                     const tipos = getTiposPago(o)
                     const enAvealma = cobradoAvealma(o)
                     const enGetnet = cobradoGetnet(o)
@@ -104,7 +103,7 @@ export default function Ingresos() {
                         <td className="text-right">{fmt(o.shipping_total)}</td>
                         <td className="text-right">
                           <strong>{fmt(ingresoReal)}</strong>
-                          {tieneHistorial && ingresoReal !== totalOriginal && (
+                          {ingresoReal !== totalOriginal && (
                             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                               pedido: {fmt(totalOriginal)}
                             </div>
