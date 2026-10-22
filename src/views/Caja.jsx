@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext'
 import { getAppConfig } from '../utils/appConfig'
 import { calcAgip } from '../utils/impuestos'
 import { loadCuentasPagar } from '../utils/cuentasPagar'
-import { medioCobro, pagadoOnline } from '../utils/pedidos'
+import { medioCobro, pagadoOnline, esMetodoOnline } from '../utils/pedidos'
 
 // Parsear fecha del historial: "27/04/2026 13:45" -> Date
 function parseFechaHistorial(s) {
@@ -23,17 +23,20 @@ function parseFechaHistorial(s) {
 
 // Cobros de una orden posteriores al timestamp del cierre
 function getCobrosDelPeriodo(order, desde) {
-  const hist = order.io_pagos_historial
-  if (Array.isArray(hist) && hist.length > 0) {
-    return hist
-      .filter(p => { const f = parseFechaHistorial(p.fecha); return f && f > desde })
-      .map(p => ({ monto: parseFloat(p.monto||0), medio: medioCobro(p.metodo), fecha: p.fecha, numero: order.number }))
+  const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
+  const online = pagadoOnline(order)
+  const cobros = []
+  // Pago online: la pasarela cobró el total en la fecha de pago de WooCommerce
+  if (online && new Date(order.date_paid || order.date_created) > desde) {
+    cobros.push({ monto: parseFloat(order.total||0), medio: 'banco', numero: order.number })
   }
-  // Sin historial solo cuentan los pagos online; el resto entra cuando se carga en el metabox
-  if (pagadoOnline(order) && new Date(order.date_paid || order.date_created) > desde) {
-    return [{ monto: parseFloat(order.total||0), medio: 'banco', numero: order.number }]
-  }
-  return []
+  // Del historial, en un pedido pagado online se omiten los registros de esa pasarela: se cargan
+  // a mano después y no son plata nueva. Sin historial ni pago online, no hay cobros todavía.
+  hist
+    .filter(p => !(online && esMetodoOnline(p.metodo)))
+    .filter(p => { const f = parseFechaHistorial(p.fecha); return f && f > desde })
+    .forEach(p => cobros.push({ monto: parseFloat(p.monto||0), medio: medioCobro(p.metodo), fecha: p.fecha, numero: order.number }))
+  return cobros
 }
 
 // Diferencia de arqueo: positiva = sobra plata, negativa = falta
