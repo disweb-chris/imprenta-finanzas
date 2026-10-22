@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, addDoc } from 'firebase/firestore'
+import { collection, doc, writeBatch } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { searchCustomers, saveWCConfig, getWCConfig } from '../utils/woocommerce'
 import { fmt, todayStr } from '../utils/helpers'
@@ -8,6 +8,8 @@ import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
 
 const LS_KEY = 'io_pc_state_v3'
+// Productos ya calculados del pedido que se está armando, hasta guardarlo
+const LS_ITEMS_KEY = 'io_pc_items_v1'
 
 const DEFAULTS = {
   paperType: 'Obra 75g', paperSize: '32x47',
@@ -16,7 +18,18 @@ const DEFAULTS = {
   doubleFace: false, applyVat: false,
   costPaper: '0', costPrint: '0', costSetup: '0',
   prodMode: PROD_MODES.PORCENTAJE, prodValor: '0', profitPct: '0', iibbPct: '4',
+  extras: [],
 }
+
+const leerItems = () => {
+  try {
+    const raw = localStorage.getItem(LS_ITEMS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* localStorage no disponible */ }
+  return []
+}
+
+const signo = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + fmt(Math.abs(n))
 
 const PAPER_SIZES = [
   ['22x34', '22 × 34 cm'], ['32x47', '32 × 47 cm'],
@@ -46,6 +59,8 @@ export default function Calculadora() {
   const [ajuste, setAjuste] = useState(null)
   const [showAjusteForm, setShowAjusteForm] = useState(false)
   const [ajusteForm, setAjusteForm] = useState({ monto: '', motivo: '' })
+
+  const [items, setItems] = useState(leerItems)
 
   const [showGuardar, setShowGuardar] = useState(false)
   const [clienteForm, setClienteForm] = useState({ cliente_nombre: '', cliente_email: '', cliente_telefono: '', cliente_wc_id: null })
@@ -80,6 +95,10 @@ export default function Calculadora() {
   }, [form])
 
   useEffect(() => {
+    try { localStorage.setItem(LS_ITEMS_KEY, JSON.stringify(items)) } catch { /* localStorage no disponible */ }
+  }, [items])
+
+  useEffect(() => {
     if (!showGuardar) return
     if (clienteQuery.trim().length < 2) { setClienteResults([]); return }
     const t = setTimeout(async () => {
@@ -92,6 +111,10 @@ export default function Calculadora() {
   }, [clienteQuery, showGuardar])
 
   const setField = (name, value) => setForm(f => ({ ...f, [name]: value }))
+
+  const agregarExtra = () => setForm(f => ({ ...f, extras: [...(f.extras || []), { concepto: '', monto: '' }] }))
+  const setExtra = (idx, name, value) => setForm(f => ({ ...f, extras: f.extras.map((e, i) => i === idx ? { ...e, [name]: value } : e) }))
+  const quitarExtra = (idx) => setForm(f => ({ ...f, extras: f.extras.filter((_, i) => i !== idx) }))
 
   const onPaperSizeChange = (value) => {
     if (value === 'custom') { setField('paperSize', value); return }
@@ -128,6 +151,8 @@ export default function Calculadora() {
   const quitarAjuste = () => setAjuste(null)
 
   const precioFinalEfectivo = resultado ? (ajusteVigente ? ajusteVigente.montoAjustado : resultado.precioFinalBase) : 0
+  // Redondeo o diferencia: lo que se cobra de más (+) o de menos (−) respecto de la calculadora
+  const diferenciaAjuste = resultado && ajusteVigente ? ajusteVigente.montoAjustado - resultado.precioFinalBase : 0
   const ivaMonto = form.applyVat ? precioFinalEfectivo * 0.21 : 0
   const precioFinalConIva = precioFinalEfectivo + ivaMonto
   const unitPriceEfectivo = resultado ? precioFinalEfectivo / resultado.qty : 0
@@ -162,34 +187,102 @@ export default function Calculadora() {
       `Costo papel: ${fmt(r.costos.papel)} — Costo impresión: ${fmt(r.costos.impresion)} — Costo fijo: ${fmt(r.costos.fijo)}`,
       `Costo base: ${fmt(r.costos.base)} + Producción ${fmt(r.costos.produccion)} + Ganancia ${fmt(r.costos.ganancia)} + IIBB ${fmt(r.costos.iibb)}`,
     ]
-    if (ajusteVigente) lineas.push(`Ajuste manual: ${fmt(resultado.precioFinalBase)} → ${fmt(ajusteVigente.montoAjustado)} — Motivo: ${ajusteVigente.motivo}`)
+    r.extras.forEach(e => lineas.push(`+ ${e.concepto}: ${fmt(e.monto)}`))
+    lineas.push(`Costo de producción: ${fmt(r.costos.produccionTotal)}`)
+    if (ajusteVigente) lineas.push(`Redondeo / diferencia: ${signo(diferenciaAjuste)} (${fmt(resultado.precioFinalBase)} → ${fmt(ajusteVigente.montoAjustado)}) — Motivo: ${ajusteVigente.motivo}`)
     if (form.applyVat) lineas.push(`+ IVA 21%: ${fmt(ivaMonto)} — Precio final con IVA: ${fmt(precioFinalConIva)}`)
     lineas.push(`Precio final: ${fmt(precioFinalEfectivo)} — Precio unitario: ${fmt(unitPriceEfectivo)}`)
     return lineas.join('\n')
   }
 
+  const nombreSugerido = () => `${form.qty} u. ${form.itemW}×${form.itemH} cm — ${form.paperType}${form.doubleFace ? ' doble faz' : ''}`
+
+  // Foto del cálculo actual: los montos quedan congelados, aunque mañana cambie el precio del papel
+  const armarItem = (nombre) => ({
+    nombre: (nombre || '').trim() || nombreSugerido(),
+    cantidad: resultado.qty,
+    costo: resultado.costos.produccionTotal,
+    precio_calculadora: resultado.precioFinalBase,
+    diferencia: diferenciaAjuste,
+    precio: precioFinalEfectivo,
+    precio_cobrar: form.applyVat ? precioFinalConIva : precioFinalEfectivo,
+    detalle: armarDetalle(),
+    calculo: { ...form, ajuste: ajusteVigente },
+  })
+
+  const agregarItem = () => {
+    if (!resultado) { toast('Corregí los datos del cálculo primero', 'error'); return }
+    setItems(prev => [...prev, armarItem()])
+    toast('Producto agregado al pedido — podés calcular el siguiente', 'success')
+  }
+
+  const renombrarItem = (idx, nombre) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, nombre } : it))
+  const quitarItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx))
+
+  // Vuelve a cargar el producto en la calculadora para corregirlo; se agrega de nuevo al terminar
+  const editarItem = (idx) => {
+    const { ajuste: ajusteGuardado, ...calc } = items[idx].calculo
+    const nuevoForm = { ...DEFAULTS, ...calc }
+    setForm(nuevoForm)
+    setAjuste(ajusteGuardado ? { ...ajusteGuardado, formSnapshot: JSON.stringify(nuevoForm) } : null)
+    quitarItem(idx)
+  }
+
+  // Lo que se guarda: los productos agregados o, si no hay ninguno, el cálculo de pantalla
+  const itemsAGuardar = items.length ? items : (resultado ? [armarItem()] : [])
+  const totalCobrar = itemsAGuardar.reduce((s, it) => s + it.precio_cobrar, 0)
+  const totalCosto = itemsAGuardar.reduce((s, it) => s + it.costo, 0)
+
   const guardarCotizacion = async () => {
     if (!clienteForm.cliente_nombre.trim()) { toast('Ingresá el nombre del cliente', 'error'); return }
-    if (!resultado) { toast('Corregí los datos del cálculo primero', 'error'); return }
+    if (!itemsAGuardar.length) { toast('Corregí los datos del cálculo primero', 'error'); return }
     setGuardando(true)
     try {
-      await addDoc(collection(db, 'cotizaciones'), {
+      const cliente = {
         cliente_nombre: clienteForm.cliente_nombre.trim(),
         cliente_email: clienteForm.cliente_email.trim(),
         cliente_telefono: clienteForm.cliente_telefono.trim(),
         cliente_wc_id: clienteForm.cliente_wc_id || null,
+      }
+      const ahora = new Date().toISOString()
+      const cotRef = doc(collection(db, 'cotizaciones'))
+      const costoRef = doc(collection(db, 'costos'))
+      // Cotización (precio al cliente) y costo (lo que cuesta producirlo) se guardan juntos y enlazados
+      const batch = writeBatch(db)
+      batch.set(cotRef, {
+        ...cliente,
         fecha: todayStr(),
         estado: 'borrador',
-        monto: Math.round(form.applyVat ? precioFinalConIva : precioFinalEfectivo),
-        detalle: armarDetalle(),
+        monto: Math.round(totalCobrar),
+        detalle: itemsAGuardar.length > 1
+          ? itemsAGuardar.map(it => `— ${it.nombre} —\n${it.detalle}`).join('\n\n')
+          : itemsAGuardar[0].detalle,
         archivos_presupuesto: [], archivos_oc: [],
-        calculo: { ...form, ajuste: ajusteVigente },
+        calculo: itemsAGuardar.length === 1 ? itemsAGuardar[0].calculo : null,
+        costo_id: costoRef.id,
         usuario: user.email,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: ahora,
+        updatedAt: ahora,
       })
-      toast('Cotización guardada — ya la ves en Cotizaciones', 'success')
+      batch.set(costoRef, {
+        ...cliente,
+        cotizacion_id: cotRef.id,
+        fecha: todayStr(),
+        estado: 'pendiente',
+        items: itemsAGuardar,
+        costo_total: totalCosto,
+        precio_total: totalCobrar,
+        pedido_id: null,
+        pedido_numero: null,
+        asignaciones: [],
+        usuario: user.email,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      await batch.commit()
+      toast('Cotización y costo guardados — ya los ves en Cotizaciones', 'success')
       setShowGuardar(false)
+      setItems([])
       setClienteForm({ cliente_nombre: '', cliente_email: '', cliente_telefono: '', cliente_wc_id: null })
     } catch (e) {
       toast('Error al guardar: ' + e.message, 'error')
@@ -324,6 +417,20 @@ export default function Calculadora() {
               <input value={form.iibbPct} onChange={e => setField('iibbPct', e.target.value)} inputMode="decimal" />
             </div>
           </div>
+
+          <div className="field">
+            <label>Ítems extra (se suman al final y al costo de producción)</label>
+            {(form.extras || []).map((ex, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                <input value={ex.concepto} onChange={e => setExtra(i, 'concepto', e.target.value)}
+                  placeholder="Ej: diseño, laminado, envío..." style={{ flex: 2 }} />
+                <input value={ex.monto} onChange={e => setExtra(i, 'monto', e.target.value)}
+                  inputMode="decimal" placeholder="$" style={{ flex: 1 }} />
+                <button className="btn btn-secondary btn-sm" onClick={() => quitarExtra(i)} title="Quitar ítem">×</button>
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={agregarExtra}>+ Agregar ítem extra</button>
+          </div>
         </div>
 
         {/* Columna de resultado */}
@@ -348,10 +455,17 @@ export default function Calculadora() {
                 <Fila k={`+ Producción ${form.prodMode === PROD_MODES.PORCENTAJE ? `(${form.prodValor}%)` : '(monto fijo)'}`} v={fmt(resultado.costos.produccion)} />
                 <Fila k={`+ Ganancia (${form.profitPct}%)`} v={fmt(resultado.costos.ganancia)} />
                 <Fila k={`+ IIBB (${form.iibbPct}%)`} v={fmt(resultado.costos.iibb)} />
+                {resultado.extras.map((ex, i) => (
+                  <Fila key={i} k={`+ ${ex.concepto}`} v={fmt(ex.monto)} />
+                ))}
                 <Fila k="= Precio final (sin ajustar)" v={fmt(resultado.precioFinalBase)} strong color="var(--blue)" />
 
                 {ajusteVigente && (
-                  <Fila k={`Ajuste manual — ${ajusteVigente.motivo}`} v={fmt(ajusteVigente.montoAjustado)} strong color="var(--orange)" />
+                  <>
+                    <Fila k="Redondeo / diferencia" sub={ajusteVigente.motivo} v={signo(diferenciaAjuste)}
+                      color={diferenciaAjuste < 0 ? 'var(--danger)' : 'var(--success)'} />
+                    <Fila k="= Precio a cobrar (ajustado)" v={fmt(ajusteVigente.montoAjustado)} strong color="var(--orange)" />
+                  </>
                 )}
 
                 {form.applyVat && (
@@ -363,6 +477,8 @@ export default function Calculadora() {
 
                 <Fila k="Precio final / unidad" v={fmt(unitPriceEfectivo)} />
                 {form.applyVat && <Fila k="Precio final / unidad con IVA" v={fmt(unitPriceConIva)} />}
+                <Fila k="Costo de producción" sub="costo base + producción + extras — es lo que se carga en el pedido"
+                  v={fmt(resultado.costos.produccionTotal)} strong />
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -370,8 +486,52 @@ export default function Calculadora() {
                   ? <button className="btn btn-secondary" onClick={quitarAjuste}>Quitar ajuste manual</button>
                   : <button className="btn btn-secondary" onClick={abrirAjuste}>Ajustar precio final</button>
                 }
-                <button className="btn btn-primary" onClick={() => setShowGuardar(true)}>Guardar como cotización</button>
+                <button className="btn btn-secondary" onClick={agregarItem}>+ Agregar al pedido</button>
+                <button className="btn btn-primary" onClick={() => setShowGuardar(true)}>
+                  {items.length ? `Guardar pedido (${items.length})` : 'Guardar cotización y costo'}
+                </button>
               </div>
+            </>
+          )}
+
+          {items.length > 0 && (
+            <div className="table-card" style={{ marginBottom: 16 }}>
+              <div className="table-card-header"><h3>Productos del pedido</h3></div>
+              <table>
+                <thead>
+                  <tr><th>Producto</th><th className="text-right">Costo</th><th className="text-right">Cobrar</th><th /></tr>
+                </thead>
+                <tbody>
+                  {items.map((it, i) => (
+                    <tr key={i}>
+                      <td style={{ width: '100%', minWidth: 180 }}>
+                        <input value={it.nombre} onChange={e => renombrarItem(i, e.target.value)}
+                          style={{ border: '1.5px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 12, width: '100%' }} />
+                        {it.diferencia !== 0 && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Redondeo / diferencia: {signo(it.diferencia)}</div>
+                        )}
+                      </td>
+                      <td className="text-right" style={{ fontSize: 12 }}>{fmt(it.costo)}</td>
+                      <td className="text-right"><strong>{fmt(it.precio_cobrar)}</strong></td>
+                      <td className="text-center" style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => editarItem(i)} title="Volver a cargarlo en la calculadora">Editar</button>{' '}
+                        <button className="btn btn-danger btn-sm" onClick={() => quitarItem(i)}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td><strong>Total</strong></td>
+                    <td className="text-right"><strong>{fmt(items.reduce((s, it) => s + it.costo, 0))}</strong></td>
+                    <td className="text-right"><strong>{fmt(items.reduce((s, it) => s + it.precio_cobrar, 0))}</strong></td>
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {resultado && (
+            <>
 
               <div className="io-pc-two" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
@@ -412,7 +572,7 @@ export default function Calculadora() {
       {showGuardar && (
         <div className="modal-overlay open" onClick={e => e.target === e.currentTarget && setShowGuardar(false)}>
           <div className="modal" style={{ width: 480 }}>
-            <div className="modal-header"><h3>Guardar como cotización</h3><button className="modal-close" onClick={() => setShowGuardar(false)}>×</button></div>
+            <div className="modal-header"><h3>Guardar cotización y costo</h3><button className="modal-close" onClick={() => setShowGuardar(false)}>×</button></div>
 
             {!clienteForm.cliente_wc_id && (
               <div className="field">
@@ -446,7 +606,10 @@ export default function Calculadora() {
             </div>
 
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Se guarda con estado <strong>Borrador</strong> por {fmt(form.applyVat ? precioFinalConIva : precioFinalEfectivo)} — vas a poder cambiar el estado y subir archivos después desde Cotizaciones.
+              {itemsAGuardar.length > 1 ? `${itemsAGuardar.length} productos — ` : ''}
+              Se guarda la cotización con estado <strong>Borrador</strong> por {fmt(totalCobrar)} y su costo de producción
+              de {fmt(totalCosto)}. Desde Cotizaciones podés cambiar el estado, subir archivos y vincularla a un pedido
+              para cargarle el costo en WooCommerce.
             </p>
 
             <div className="modal-footer">

@@ -9,6 +9,15 @@ export function esPedidoCobroSaldo(order) {
   )
 }
 
+// Costo total de una línea de pedido. Primero el que calcula el plugin IO Costos (viene en
+// `order.io_costos`); si el pedido es anterior al plugin, el que dejaba YITH por unidad.
+export function costoLinea(order, item) {
+  const io = (order.io_costos?.lineas || []).find(l => l.id === item.id)
+  if (io && io.origen && io.origen !== 'sin_costo') return io.total
+  const yith = (item.meta_data || []).find(m => m.key === 'yith_cog_item_cost' || m.key === '_yith_cog_item_cost')
+  return yith ? (parseFloat(yith.value) || 0) * (parseInt(item.quantity) || 1) : 0
+}
+
 // Pedido pagado online desde la web: pasarela de Mercado Pago o GetNet con el pago confirmado
 // por WooCommerce (fecha de pago o id de transacción) y en un estado que no sea de espera.
 const ESTADOS_SIN_COBRAR = ['pending', 'on-hold', 'failed', 'cancelled']

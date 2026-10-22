@@ -23,7 +23,8 @@ function layout(sheetW, sheetH, pieceW, pieceH, gutter) {
 export const PROD_MODES = { PORCENTAJE: 'pct', MONTO: 'monto' }
 
 // input: { sheetW, sheetH, itemW, itemH, bleedMM, gutterMM, extraSheets, qty, doubleFace,
-//          costPaper, costPrint, costSetup, prodMode, prodValor, profitPct, iibbPct }
+//          costPaper, costPrint, costSetup, prodMode, prodValor, profitPct, iibbPct,
+//          extras: [{ concepto, monto }] }
 // Devuelve el desglose completo o lanza Error con un mensaje para mostrar al usuario.
 export function calcularPresupuesto(input) {
   const sheetW = parseNum(input.sheetW)
@@ -48,6 +49,18 @@ export function calcularPresupuesto(input) {
   if (sheetW <= 0 || sheetH <= 0 || itemW <= 0 || itemH <= 0 || bleedMM < 0 || gutterMM < 0 || qty <= 0) {
     throw new Error('Revisá los valores: pliego/pieza/cantidad deben ser > 0. Demasía/separación pueden ser 0.')
   }
+
+  // Ítems extra (diseño, laminado, envío…): un monto vacío no cuenta, uno inválido es error
+  const extras = []
+  for (const e of (input.extras || [])) {
+    if (String(e.monto ?? '').trim() === '') continue
+    // En plata «1.500» es mil quinientos, no uno coma cinco (mismo criterio que IO Costos)
+    const crudo = String(e.monto).trim().replace(/\$|\s/g, '')
+    const monto = parseNum(/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(crudo) ? crudo.replace(/\./g, '') : crudo)
+    if (isNaN(monto)) throw new Error(`Revisá el monto del ítem extra «${e.concepto || 'sin nombre'}».`)
+    extras.push({ concepto: String(e.concepto || '').trim() || 'Extra', monto })
+  }
+  const extrasMonto = extras.reduce((s, e) => s + e.monto, 0)
 
   const bleedCM = bleedMM / 10
   const gutterCM = gutterMM / 10
@@ -89,7 +102,8 @@ export function calcularPresupuesto(input) {
   const costoConGanancia = costoConProduccion + gananciaMonto
 
   const iibbMonto = costoConGanancia * (Math.max(0, iibbPct) / 100)
-  const precioFinalBase = costoConGanancia + iibbMonto
+  // Los extras se suman al final, sin ganancia ni IIBB encima: se cobran lo que valen
+  const precioFinalBase = costoConGanancia + iibbMonto + extrasMonto
 
   return {
     orientacion,
@@ -101,8 +115,11 @@ export function calcularPresupuesto(input) {
     qty,
     costos: {
       papel: costoPapel, impresion: costoImpresion, fijo: costoFijo, base: costoBase,
-      produccion: produccionMonto, ganancia: gananciaMonto, iibb: iibbMonto,
+      produccion: produccionMonto, ganancia: gananciaMonto, iibb: iibbMonto, extras: extrasMonto,
+      // Lo que cuesta producirlo: costo base + producción + extras. Ganancia e IIBB son precio, no costo.
+      produccionTotal: costoBase + produccionMonto + extrasMonto,
     },
+    extras,
     precioFinalBase,
     unitPriceBase: precioFinalBase / qty,
   }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt } from '../utils/helpers'
-import { COBRO_SALDO_SKU, COBRO_SALDO_NOMBRE, esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
+import { COBRO_SALDO_SKU, COBRO_SALDO_NOMBRE, esPedidoCobroSaldo, getIngresoReal, costoLinea } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
 
 export default function Profit() {
@@ -56,10 +56,7 @@ export default function Profit() {
         const vid = item.variation_id || null
         const key = vid ? `v${vid}` : `p${pid}`
 
-        const costMeta = (item.meta_data || []).find(
-          m => m.key === 'yith_cog_item_cost' || m.key === '_yith_cog_item_cost'
-        )
-        const cost = costMeta ? parseFloat(costMeta.value) || 0 : 0
+        const costoTotalLinea = costoLinea(order, item)
         const qty = parseInt(item.quantity) || 1
 
         // Ingreso por ítem: proporcional al ingreso real si hay historial de pagos
@@ -76,7 +73,7 @@ export default function Profit() {
         if (!map[key]) map[key] = { nombre: item.name, cantidad: 0, ingresos: 0, costo_total: 0 }
         map[key].cantidad += qty
         map[key].ingresos += ingresoItem
-        map[key].costo_total += cost * qty
+        map[key].costo_total += costoTotalLinea
       }
     }
 
@@ -103,7 +100,7 @@ export default function Profit() {
   return (
     <div className="view">
       <div className="view-header-row">
-        <div><h2>Profit por Producto</h2><p>Ingresos vs costo YITH · {periodLabel()}</p></div>
+        <div><h2>Profit por Producto</h2><p>Ingresos vs costo de la tienda (IO Costos) ·{periodLabel()}</p></div>
         <button className="btn btn-primary btn-sm" onClick={load}>↻ Recalcular</button>
       </div>
 
