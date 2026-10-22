@@ -4,12 +4,43 @@ import { db } from '../firebase/config'
 import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate, todayStr, medioPagoInfo, localDateStr } from '../utils/helpers'
 import { crearCuentaPagar } from '../utils/cuentasPagar'
+import { costoLinea } from '../utils/pedidos'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
+import VincularCosto from '../components/VincularCosto'
 
 const DEFAULT_PROVEEDORES = ['Proveedor principal', 'Papel y materiales', 'Tinta', 'Sublimación', 'Otros']
 
 const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
+
+// Costos de un pedido agrupados por producto — permite ajustar el costo pedido por pedido,
+// no solo un total agregado por producto en todo el período. Solo líneas con costo > 0.
+const costosDelPedido = (order) => {
+  const productMap = {}
+  for (const item of (order.line_items || [])) {
+    const prodKey = item.variation_id
+      ? `v${item.variation_id}`
+      : `p${item.product_id}`
+    const key = `o${order.id}_${prodKey}`
+    const qty = parseInt(item.quantity) || 1
+    const costoTotal = costoLinea(order, item)
+
+    if (!productMap[key]) {
+      productMap[key] = {
+        key,
+        pedido_id: order.id,
+        pedido_numero: order.number,
+        nombre: item.name,
+        cantidad: 0,
+        costo_calculado: 0,
+        costo_unit: costoTotal / qty,
+      }
+    }
+    productMap[key].cantidad += qty
+    productMap[key].costo_calculado += costoTotal
+  }
+  return Object.values(productMap).filter(p => p.costo_calculado > 0)
+}
 
 export default function Liquidacion() {
   const toast = useToast()
@@ -32,6 +63,9 @@ export default function Liquidacion() {
 
   // Líneas de la liquidación actual
   const [lineas, setLineas] = useState([])
+  const [orders, setOrders] = useState([])
+  // Modal «Traer costo de la calculadora»: { order } con el pedido elegido, o {} para elegirlo adentro
+  const [vincular, setVincular] = useState(null)
   const [calculando, setCalculando] = useState(false)
   const [calculado, setCalculado] = useState(false)
   const [registrando, setRegistrando] = useState(false)
@@ -70,43 +104,11 @@ export default function Liquidacion() {
     try {
       const start = new Date(periodoStart + 'T00:00:00')
       const end = new Date(periodoEnd + 'T23:59:59')
-      const orders = await fetchOrders(start, end, 'completed,processing')
+      const ords = await fetchOrders(start, end, 'completed,processing')
+      setOrders(ords)
 
-      // Agrupar costos por pedido + producto — permite ajustar el costo pedido por pedido,
-      // no solo un total agregado por producto en todo el período
-      const productMap = {}
-      for (const order of orders) {
-        for (const item of (order.line_items || [])) {
-          const prodKey = item.variation_id
-            ? `v${item.variation_id}`
-            : `p${item.product_id}`
-          const key = `o${order.id}_${prodKey}`
-          const costMeta = (item.meta_data || []).find(
-            m => m.key === 'yith_cog_item_cost' || m.key === '_yith_cog_item_cost'
-          )
-          const costoUnit = costMeta ? parseFloat(costMeta.value) || 0 : 0
-          const qty = parseInt(item.quantity) || 1
-          const costoTotal = costoUnit * qty
-
-          if (!productMap[key]) {
-            productMap[key] = {
-              key,
-              pedido_id: order.id,
-              pedido_numero: order.number,
-              nombre: item.name,
-              cantidad: 0,
-              costo_calculado: 0,
-              costo_unit: costoUnit,
-            }
-          }
-          productMap[key].cantidad += qty
-          productMap[key].costo_calculado += costoTotal
-        }
-      }
-
-      // Convertir a líneas editables — solo líneas con costo > 0
-      const nuevasLineas = Object.values(productMap)
-        .filter(p => p.costo_calculado > 0)
+      // Convertir a líneas editables
+      const nuevasLineas = ords.flatMap(costosDelPedido)
         .sort((a, b) => b.costo_calculado - a.costo_calculado)
         .map(p => ({
           ...p,
@@ -116,12 +118,11 @@ export default function Liquidacion() {
           incluir: true,
         }))
 
-      // Agregar línea vacía para gastos extra manuales
       setLineas(nuevasLineas)
       setCalculado(true)
 
       if (nuevasLineas.length === 0) {
-        toast('No hay costos YITH registrados en ese período', 'error')
+        toast('No hay costos cargados en la tienda en ese período', 'error')
       } else {
         toast(`${nuevasLineas.length} productos encontrados`, 'success')
       }
@@ -129,6 +130,29 @@ export default function Liquidacion() {
       toast('Error al calcular: ' + e.message, 'error')
     }
     setCalculando(false)
+  }
+
+  // ── Costo traído de la calculadora ───────────────────────
+  // Rehace las líneas de ese pedido con el costo nuevo; conserva proveedor y medio ya elegidos
+  const costoAplicado = ({ order }) => {
+    if (!orders.some(o => o.id === order.id)) {
+      toast(`El pedido #${order.number} no es del período elegido: su costo queda cargado en la tienda`)
+      return
+    }
+    setOrders(prev => prev.map(o => o.id === order.id ? order : o))
+    setLineas(prev => {
+      const anteriores = Object.fromEntries(prev.filter(l => l.pedido_id === order.id).map(l => [l.key, l]))
+      const nuevas = costosDelPedido(order).map(p => ({
+        ...p,
+        costo_ajustado: p.costo_calculado,
+        proveedor: anteriores[p.key]?.proveedor || proveedores[0],
+        medio_pago: anteriores[p.key]?.medio_pago || 'banco',
+        incluir: anteriores[p.key]?.incluir ?? true,
+      }))
+      const idx = prev.findIndex(l => l.pedido_id === order.id)
+      const resto = prev.filter(l => l.pedido_id !== order.id)
+      return idx === -1 ? [...nuevas, ...resto] : [...resto.slice(0, idx), ...nuevas, ...resto.slice(idx)]
+    })
   }
 
   // ── Editar línea ─────────────────────────────────────────
@@ -309,9 +333,14 @@ export default function Liquidacion() {
           <div className="table-card" style={{ marginBottom: 16 }}>
             <div className="table-card-header">
               <h3>Líneas de costo</h3>
-              <button className="btn btn-secondary btn-sm" onClick={addLinea}>
-                + Agregar línea manual
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => setVincular({})}>
+                  Traer costo de la calculadora
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={addLinea}>
+                  + Agregar línea manual
+                </button>
+              </div>
             </div>
             <table>
               <thead>
@@ -320,7 +349,7 @@ export default function Liquidacion() {
                   <th>Pedido</th>
                   <th>Producto / Concepto</th>
                   <th className="text-right">Cant.</th>
-                  <th className="text-right">Costo YITH</th>
+                  <th className="text-right">Costo tienda</th>
                   <th className="text-right" style={{ color: 'var(--blue)' }}>Costo ajustado</th>
                   <th>Proveedor</th>
                   <th>Medio</th>
@@ -335,8 +364,15 @@ export default function Liquidacion() {
                         onChange={e => updateLinea(i, 'incluir', e.target.checked)}
                         style={{ cursor: 'pointer', width: 16, height: 16 }} />
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                       {l.pedido_numero ? `#${l.pedido_numero}` : '-'}
+                      {l.pedido_id && (
+                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, padding: '2px 6px', fontSize: 10 }}
+                          title="Cargar en este pedido un costo de la calculadora"
+                          onClick={() => setVincular({ order: orders.find(o => o.id === l.pedido_id) })}>
+                          Traer costo
+                        </button>
+                      )}
                     </td>
                     <td>
                       {l.manual
@@ -405,7 +441,7 @@ export default function Liquidacion() {
           <div style={{ background: '#fff', borderRadius: 10, padding: '18px 24px', boxShadow: 'var(--shadow)', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Costo YITH calculado</div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>Costo tienda calculado</div>
                 <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 700, color: 'var(--text-muted)' }}>{fmt(totalCalculado)}</div>
               </div>
               <div>
@@ -499,6 +535,10 @@ export default function Liquidacion() {
               </table>
         }
       </div>
+
+      {vincular && (
+        <VincularCosto order={vincular.order || null} onClose={() => setVincular(null)} onAplicado={costoAplicado} />
+      )}
 
       {/* Modal detalle liquidación */}
       {showDetalle && (

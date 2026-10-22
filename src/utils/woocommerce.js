@@ -10,17 +10,27 @@ const wcAuth = () => {
   return 'Basic ' + btoa(`${key}:${secret}`)
 }
 
-export const wcFetch = async (endpoint) => {
+// base: 'wc/v3' para la API de WooCommerce, 'io-costos/v1' para la del plugin IO Costos
+// (acepta las mismas claves). Los errores traen el mensaje que devuelve la tienda.
+const wcRequest = async (endpoint, { method = 'GET', body, base = 'wc/v3' } = {}) => {
   const { url, key, secret } = getWC()
   if (!url || !key || !secret) {
     throw new Error('Configurá la conexión a WooCommerce en Configuración antes de continuar')
   }
-  const r = await fetch(`${url}/wp-json/wc/v3${endpoint}`, {
-    headers: { Authorization: wcAuth() }
+  const headers = { Authorization: wcAuth() }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const r = await fetch(`${url}/wp-json/${base}${endpoint}`, {
+    method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`WC API ${r.status}`)
+  if (!r.ok) {
+    let msg = ''
+    try { msg = (await r.json()).message || '' } catch { /* respuesta sin JSON */ }
+    throw new Error(`WC API ${r.status}${msg ? ` — ${msg}` : ''}`)
+  }
   return r.json()
 }
+
+export const wcFetch = (endpoint) => wcRequest(endpoint)
 
 // Fetch orders between two Date objects (supports full timestamp for caja logic)
 export const fetchOrders = async (startDate, endDate, status = 'completed,processing') => {
@@ -55,3 +65,21 @@ export const searchCustomers = async (search) => {
   if (q.length < 2) return []
   return wcFetch(`/customers?search=${encodeURIComponent(q)}&per_page=10`)
 }
+
+// Busca un pedido por su número. El número suele ser el id; si no coincide, se busca por texto.
+export const findOrder = async (numero) => {
+  const n = String(numero || '').replace('#', '').trim()
+  if (!/^\d+$/.test(n)) return null
+  try {
+    const o = await wcFetch(`/orders/${n}`)
+    if (String(o.number) === n) return o
+  } catch { /* no hay pedido con ese id */ }
+  const res = await wcFetch(`/orders?search=${n}&per_page=20`)
+  return res.find(o => String(o.number) === n) || null
+}
+
+// Carga en cada línea del pedido su «Costo a mano» por unidad (plugin IO Costos, que recalcula
+// el costo y la ganancia del pedido). lineas: [{ id, costo_unitario }]. Devuelve el costo del
+// pedido ya recalculado, con la misma forma que `order.io_costos`.
+export const cargarCostosPedido = (orderId, lineas, referencia = '') =>
+  wcRequest(`/pedidos/${orderId}/costos`, { method: 'POST', base: 'io-costos/v1', body: { lineas, referencia } })

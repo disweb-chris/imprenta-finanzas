@@ -5,12 +5,15 @@ import { fetchOrders } from '../utils/woocommerce'
 import { fmt, fmtDate } from '../utils/helpers'
 import { esPedidoCobroSaldo, getIngresoReal } from '../utils/pedidos'
 import { usePeriod } from '../context/PeriodContext'
+import VincularCosto from '../components/VincularCosto'
 
 export default function RentabilidadPedidos() {
   const { getPeriodDates, periodLabel } = usePeriod()
   const [loading, setLoading] = useState(true)
   const [pedidos, setPedidos] = useState([])
   const [sortDir, setSortDir] = useState('asc')
+  // Pedido al que se le está trayendo el costo de la calculadora
+  const [vincular, setVincular] = useState(null)
 
   useEffect(() => { loadAll() }, [getPeriodDates])
 
@@ -18,10 +21,19 @@ export default function RentabilidadPedidos() {
     setLoading(true)
     const { start, end } = getPeriodDates()
 
-    const [ords, costoSnap] = await Promise.all([
+    const [ords, costoSnap, calcSnap] = await Promise.all([
       fetchOrders(start, end, 'completed,processing').catch(() => []),
       getDocs(query(collection(db, 'egresos'), where('categoria', '==', 'produccion-tercerizada'))),
+      getDocs(query(collection(db, 'costos'), where('estado', '==', 'aplicado'))),
     ])
+
+    // Costo de la calculadora cargado en el pedido — vale mientras el pedido no se liquide
+    const costoCalcPorPedido = {}
+    calcSnap.forEach(d => {
+      const x = d.data()
+      if (!x.pedido_id) return
+      costoCalcPorPedido[x.pedido_id] = (costoCalcPorPedido[x.pedido_id] || 0) + parseFloat(x.costo_aplicado ?? x.costo_total ?? 0)
+    })
 
     // Costo de producción tercerizada por pedido — viene de las líneas de Liquidación
     // vinculadas por pedido (origen_pedido) desde Etapa 1
@@ -35,8 +47,10 @@ export default function RentabilidadPedidos() {
     const filtrados = ords.filter(o => !esPedidoCobroSaldo(o))
     const rows = filtrados.map(o => {
       const ingreso = getIngresoReal(o)
-      const tieneCosto = Object.prototype.hasOwnProperty.call(costoPorPedido, o.id)
-      const costo = tieneCosto ? costoPorPedido[o.id] : null
+      const liquidado = Object.prototype.hasOwnProperty.call(costoPorPedido, o.id)
+      const deCalculadora = !liquidado && Object.prototype.hasOwnProperty.call(costoCalcPorPedido, o.id)
+      const tieneCosto = liquidado || deCalculadora
+      const costo = liquidado ? costoPorPedido[o.id] : deCalculadora ? costoCalcPorPedido[o.id] : null
       const margen = tieneCosto ? ingreso - costo : null
       const margenPct = tieneCosto ? (ingreso > 0 ? (margen / ingreso) * 100 : 0) : null
       return {
@@ -46,8 +60,10 @@ export default function RentabilidadPedidos() {
         fecha: o.date_created,
         ingreso,
         costo,
+        deCalculadora,
         margen,
         margenPct,
+        order: o,
       }
     })
 
@@ -115,6 +131,15 @@ export default function RentabilidadPedidos() {
                       <td className="text-right">{fmt(p.ingreso)}</td>
                       <td className="text-right">
                         {p.costo !== null ? fmt(p.costo) : <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                        {p.deCalculadora && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>de la calculadora</div>}
+                        {(p.costo === null || p.deCalculadora) && (
+                          <div>
+                            <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 10, marginTop: 2 }}
+                              onClick={() => setVincular(p.order)}>
+                              Traer costo
+                            </button>
+                          </div>
+                        )}
                       </td>
                       <td className="text-right" style={{ fontWeight: 700, color: p.margen === null ? 'var(--text-muted)' : p.margen >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                         {p.margen !== null ? fmt(p.margen) : '-'}
@@ -132,6 +157,10 @@ export default function RentabilidadPedidos() {
             )
         }
       </div>
+
+      {vincular && (
+        <VincularCosto order={vincular} onClose={() => setVincular(null)} onAplicado={() => loadAll()} />
+      )}
     </div>
   )
 }

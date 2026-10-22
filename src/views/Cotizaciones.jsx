@@ -6,6 +6,7 @@ import { searchCustomers } from '../utils/woocommerce'
 import { fmt, fmtDate, todayStr, waLink } from '../utils/helpers'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
+import VincularCosto from '../components/VincularCosto'
 
 const ESTADOS = {
   borrador: { label: 'Borrador', cls: 'badge-gray' },
@@ -35,6 +36,9 @@ export default function Cotizaciones() {
   const { user } = useAuth()
 
   const [cotizaciones, setCotizaciones] = useState([])
+  // Costo de producción de cada cotización hecha en la calculadora, por id de cotización
+  const [costos, setCostos] = useState({})
+  const [vincular, setVincular] = useState(null)
   const [loading, setLoading] = useState(true)
   const [filterEstado, setFilterEstado] = useState('')
 
@@ -52,10 +56,16 @@ export default function Cotizaciones() {
 
   const load = async () => {
     setLoading(true)
-    const snap = await getDocs(query(collection(db, 'cotizaciones'), orderBy('fecha', 'desc')))
+    const [snap, costosSnap] = await Promise.all([
+      getDocs(query(collection(db, 'cotizaciones'), orderBy('fecha', 'desc'))),
+      getDocs(collection(db, 'costos')),
+    ])
     const rows = []
     snap.forEach(d => rows.push({ id: d.id, ...d.data() }))
     setCotizaciones(rows)
+    const porCotizacion = {}
+    costosSnap.forEach(d => { const c = { id: d.id, ...d.data() }; if (c.cotizacion_id) porCotizacion[c.cotizacion_id] = c })
+    setCostos(porCotizacion)
     setLoading(false)
   }
 
@@ -190,6 +200,9 @@ export default function Cotizaciones() {
     const archivos = [...(c.archivos_presupuesto || []), ...(c.archivos_oc || [])]
     await Promise.all(archivos.map(a => deleteObject(ref(storage, a.path)).catch(() => { /* ya no existe */ })))
     await deleteDoc(doc(db, 'cotizaciones', c.id))
+    // El costo se borra solo si no se cargó en ningún pedido: si ya está en uno, es su historial
+    const costo = costos[c.id]
+    if (costo && costo.estado !== 'aplicado') await deleteDoc(doc(db, 'costos', costo.id))
     toast('Cotización eliminada')
     load()
   }
@@ -236,6 +249,7 @@ export default function Cotizaciones() {
                     <th>Cliente</th>
                     <th>Estado</th>
                     <th className="text-right">Monto</th>
+                    <th className="text-right">Costo</th>
                     <th className="text-center">Archivos</th>
                     <th className="text-center">WhatsApp</th>
                     <th className="text-center">Acciones</th>
@@ -254,6 +268,16 @@ export default function Cotizaciones() {
                         </td>
                         <td><span className={`badge ${est.cls}`}>{est.label}</span></td>
                         <td className="text-right"><strong>{fmt(c.monto)}</strong></td>
+                        <td className="text-right" style={{ fontSize: 12 }}>
+                          {costos[c.id]
+                            ? <>
+                                {fmt(costos[c.id].costo_total)}
+                                <div>{costos[c.id].estado === 'aplicado'
+                                  ? <span className="badge badge-green">Pedido #{costos[c.id].pedido_numero}</span>
+                                  : <span className="badge badge-gray">Sin pedido</span>}</div>
+                              </>
+                            : <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                        </td>
                         <td className="text-center" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                           📄 {(c.archivos_presupuesto || []).length} · 🧾 {(c.archivos_oc || []).length}
                         </td>
@@ -265,6 +289,12 @@ export default function Cotizaciones() {
                         </td>
                         <td className="text-center" style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                           <button className="btn btn-secondary btn-sm" onClick={() => openEdit(c)}>Ver / Editar</button>
+                          {costos[c.id] && (
+                            <button className="btn btn-secondary btn-sm" onClick={() => setVincular(costos[c.id])}
+                              title="Cargar este costo en los productos de un pedido de WooCommerce">
+                              {costos[c.id].estado === 'aplicado' ? 'Revincular' : 'Vincular a pedido'}
+                            </button>
+                          )}
                           <button className="btn btn-danger btn-sm" onClick={() => remove(c)}>×</button>
                         </td>
                       </tr>
@@ -275,6 +305,10 @@ export default function Cotizaciones() {
             )
         }
       </div>
+
+      {vincular && (
+        <VincularCosto costo={vincular} onClose={() => setVincular(null)} onAplicado={() => load()} />
+      )}
 
       {showModal && (
         <div className="modal-overlay open" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
@@ -334,7 +368,7 @@ export default function Cotizaciones() {
             <div className="field">
               <label>Detalle del trabajo</label>
               <textarea value={form.detalle} onChange={e => setForm(f => ({ ...f, detalle: e.target.value }))}
-                placeholder="Medidas, papel, cantidad, precio — pegá acá el resultado de la calculadora de pliegos hasta que quede conectada directo" />
+                placeholder="Medidas, papel, cantidad, precio — las cotizaciones guardadas desde la Calculadora traen el detalle solas" />
               <a href="https://imprentaonline.ar" target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>Abrir sitio con la calculadora ↗</a>
             </div>
 
