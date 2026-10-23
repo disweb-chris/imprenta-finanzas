@@ -66,7 +66,8 @@ export const statusBadge = (s) => {
 // `caja_chica_movimientos`, no es egreso) y los gastos chicos salen de ahí.
 // "avealma" = cuenta de Avealma, la empresa que nos factura (facturas A). Ahí depositan algunos
 // clientes; se descuentan impuestos (Configuración) y el neto se transfiere al banco.
-// "getnet" = pagos con GetNet; sale del banco, donde GetNet acredita lo cobrado.
+// "getnet" = cuenta de GetNet: ahí entran los cobros con GetNet, se descuentan las comisiones
+// (Configuración) y el neto se transfiere al banco. Igual que Avealma.
 export const MEDIO_PAGO = {
   banco:      { label: 'Banco',      badge: 'badge-blue',   color: '#2e509e' },
   efectivo:   { label: 'Efectivo',   badge: 'badge-orange', color: '#FF6B00' },
@@ -81,7 +82,7 @@ export const medioPagoInfo = (m) => MEDIO_PAGO[m] || MEDIO_PAGO.banco
 // el canje se paga con trabajo y lo 'a_pagar' sale después, como pago de la cuenta corriente.
 export const mueveCaja = (medio) => medio !== 'canje' && medio !== 'a_pagar'
 // De qué saldo sale un egreso que mueve caja. Cualquier valor no reconocido (incl. 'tarjeta') cuenta como banco
-export const saldoDeMedio = (medio) => ['efectivo', 'caja_chica', 'avealma'].includes(medio) ? medio : 'banco'
+export const saldoDeMedio = (medio) => ['efectivo', 'caja_chica', 'avealma', 'getnet'].includes(medio) ? medio : 'banco'
 // Medios desde/hacia los que se repone o devuelve la caja chica
 export const ORIGENES_CAJA_CHICA = ['banco', 'efectivo']
 

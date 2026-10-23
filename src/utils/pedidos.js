@@ -51,7 +51,14 @@ export function medioCobro(metodo) {
   const m = String(metodo || '').toLowerCase()
   if (m === 'efectivo') return 'efectivo'
   if (m.includes('avealma')) return 'avealma'
-  return 'banco' // transferencia, Mercado Pago y GetNet se acreditan en el banco
+  if (m.includes('getnet')) return 'getnet' // queda en la cuenta de GetNet hasta que se liquida al banco
+  return 'banco' // transferencia y Mercado Pago se acreditan en el banco
+}
+
+// Cuenta a la que entró un pedido pagado online sin historial de pagos
+export function medioPagoOnline(order) {
+  const pm = `${order.payment_method || ''} ${order.payment_method_title || ''}`.toLowerCase()
+  return pm.includes('getnet') ? 'getnet' : 'banco'
 }
 
 // Total cobrado de un pedido por depósitos en la cuenta de Avealma

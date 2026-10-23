@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext'
 import { getAppConfig } from '../utils/appConfig'
 import { calcAgip } from '../utils/impuestos'
 import { loadCuentasPagar } from '../utils/cuentasPagar'
-import { medioCobro, pagadoOnline, esMetodoOnline } from '../utils/pedidos'
+import { medioCobro, medioPagoOnline, pagadoOnline, esMetodoOnline } from '../utils/pedidos'
 
 // Parsear fecha del historial: "27/04/2026 13:45" -> Date
 function parseFechaHistorial(s) {
@@ -26,16 +26,17 @@ function getCobrosDelPeriodo(order, desde) {
   const hist = Array.isArray(order.io_pagos_historial) ? order.io_pagos_historial : []
   const online = pagadoOnline(order)
   const cobros = []
-  // Pago online: la pasarela cobró el total en la fecha de pago de WooCommerce
-  if (online && new Date(order.date_paid || order.date_created) > desde) {
-    cobros.push({ monto: parseFloat(order.total||0), medio: 'banco', numero: order.number })
+  // Pago online: la pasarela cobró el total en la fecha de pago de WooCommerce (GetNet queda en su cuenta)
+  const pagado = new Date(order.date_paid || order.date_created)
+  if (online && pagado > desde) {
+    cobros.push({ monto: parseFloat(order.total||0), medio: medioPagoOnline(order), fecha: fmtDate(_ls(pagado)), dia: _ls(pagado), numero: order.number })
   }
   // Del historial, en un pedido pagado online se omiten los registros de esa pasarela: se cargan
   // a mano después y no son plata nueva. Sin historial ni pago online, no hay cobros todavía.
   hist
     .filter(p => !(online && esMetodoOnline(p.metodo)))
     .filter(p => { const f = parseFechaHistorial(p.fecha); return f && f > desde })
-    .forEach(p => cobros.push({ monto: parseFloat(p.monto||0), medio: medioCobro(p.metodo), fecha: p.fecha, numero: order.number }))
+    .forEach(p => cobros.push({ monto: parseFloat(p.monto||0), medio: medioCobro(p.metodo), fecha: p.fecha, dia: _ls(parseFechaHistorial(p.fecha)), numero: order.number }))
   return cobros
 }
 
@@ -46,16 +47,25 @@ const TIPOS_MOV_CC = { reposicion: 'Reposición', devolucion: 'Devolución' }
 
 const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
 
+// Cuentas intermedias que se liquidan al banco: descuentan % de Configuración (como egresos
+// pagados desde la cuenta) y transfieren el neto al banco
+const CUENTAS_LIQ = {
+  avealma: { label:'Avealma', color:'#7c3aed', cfgKey:'avealma_descuentos', coleccion:'avealma_liquidaciones', origen:'origen_avealma_liquidacion',
+    entrada:'Depositado en Avealma', montoLabel:'Monto facturado ($)', cfgHint:'Configuración → Avealma', vacio:'Los depósitos de clientes se registran en el pedido con el método "Avealma".', placeholder:'Ej: Liquidación quincena 1 de octubre' },
+  getnet: { label:'GetNet', color:'#e30613', cfgKey:'getnet_comisiones', coleccion:'getnet_liquidaciones', origen:'origen_getnet_liquidacion',
+    entrada:'Cobrado con GetNet', montoLabel:'Monto liquidado ($)', cfgHint:'Configuración → GetNet', vacio:'Los cobros se registran en el pedido con el método "GetNet" o entran solos al pagar online con GetNet.', placeholder:'Ej: Liquidación GetNet del 15/10' },
+}
+
 export default function Caja() {
   const { getCat } = useCats()
   const toast = useToast()
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [lastCierre, setLastCierre] = useState(null)
-  const [kpis, setKpis] = useState({ saldoCierre:0, ventas:0, ingExtra:0, egresos:0, saldoActual:0, ventasBanco:0, ventasEfectivo:0, egresosBanco:0, egresosEfectivo:0, saldoBanco:0, saldoEfectivo:0, ordenes:0, egresosCajaChica:0, repoCajaChica:0, devCajaChica:0, netoCCBanco:0, netoCCEfectivo:0, saldoCajaChica:0, ventasAvealma:0, egresosAvealma:0, netoMovBanco:0, netoMovAvealma:0, saldoAvealma:0, descAvealmaPend:0 })
-  const [movsAvealma, setMovsAvealma] = useState([])
-  const [avDescCfg, setAvDescCfg] = useState([])
-  const [showLiqAv, setShowLiqAv] = useState(false)
+  const [kpis, setKpis] = useState({ saldoCierre:0, ventas:0, ingExtra:0, egresos:0, saldoActual:0, ventasBanco:0, ventasEfectivo:0, egresosBanco:0, egresosEfectivo:0, saldoBanco:0, saldoEfectivo:0, ordenes:0, egresosCajaChica:0, repoCajaChica:0, devCajaChica:0, netoCCBanco:0, netoCCEfectivo:0, saldoCajaChica:0, ventasAvealma:0, egresosAvealma:0, netoMovBanco:0, netoMovAvealma:0, saldoAvealma:0, descAvealmaPend:0, ventasGetnet:0, egresosGetnet:0, netoMovGetnet:0, saldoGetnet:0, descGetnetPend:0 })
+  const [movsCuenta, setMovsCuenta] = useState({ avealma:[], getnet:[] })
+  const [descCfg, setDescCfg] = useState({ avealma:[], getnet:[] })
+  const [showLiq, setShowLiq] = useState(null) // 'avealma' | 'getnet' | null
   const [liqForm, setLiqForm] = useState({ fecha:todayStr(), facturado:'', descuentos:[], transferir:'', descripcion:'' })
   const [movsCajaChica, setMovsCajaChica] = useState([])
   const [showMovCC, setShowMovCC] = useState(false)
@@ -66,7 +76,7 @@ export default function Caja() {
   const [showCierre, setShowCierre] = useState(false)
   const [showExtra, setShowExtra] = useState(false)
   const [editExtra, setEditExtra] = useState(null)
-  const [cierreForm, setCierreForm] = useState({ saldo:'', saldo_banco:'', saldo_efectivo:'', saldo_caja_chica:'', saldo_avealma:'', fecha:todayStr(), notas:'' })
+  const [cierreForm, setCierreForm] = useState({ saldo:'', saldo_banco:'', saldo_efectivo:'', saldo_caja_chica:'', saldo_avealma:'', saldo_getnet:'', fecha:todayStr(), notas:'' })
   const [extraForm, setExtraForm] = useState({ fecha:todayStr(), monto:'', tipo:'credito', descripcion:'' })
   const [saldoCalc, setSaldoCalc] = useState(0)
   const [alertMsg, setAlertMsg] = useState('')
@@ -128,16 +138,16 @@ export default function Caja() {
         getDocs(query(collection(db,'movimientos_cuentas'), where('fecha','>=',desdeFecha), where('fecha','<=',todayStr()))),
         getAppConfig(),
       ])
-      const descCfg = appCfg.avealma_descuentos || []
-      setAvDescCfg(descCfg)
+      setDescCfg({ avealma: appCfg.avealma_descuentos || [], getnet: appCfg.getnet_comisiones || [] })
 
       const ordMap = {}
       ordNuevas.forEach(o => { ordMap[o.id]=o })
       ordAntiguas.forEach(o => { if (!ordMap[o.id]) ordMap[o.id]=o })
       const todas = Object.values(ordMap)
 
-      let ventas=0, ventasBanco=0, ventasEfectivo=0, ventasAvealma=0
-      const cobrosAv=[]
+      let ventas=0, ventasBanco=0, ventasEfectivo=0
+      // Cuentas que se liquidan al banco (Avealma, GetNet): cobros, gastos/descuentos y transferencias
+      const cta = Object.fromEntries(Object.keys(CUENTAS_LIQ).map(k=>[k,{ventas:0,egresos:0,descReg:0,movs:[]}]))
       const conMov = new Set()
       todas.forEach(o => {
         const cobros = getCobrosDelPeriodo(o, desde)
@@ -146,14 +156,14 @@ export default function Caja() {
           cobros.forEach(c => {
             ventas+=c.monto
             if (c.medio==='efectivo') ventasEfectivo+=c.monto
-            else if (c.medio==='avealma') { ventasAvealma+=c.monto; cobrosAv.push({id:`c${o.id}-${cobrosAv.length}`,tipo:'cobro',numero:c.numero,fechaTxt:c.fecha,fecha:c.fecha?_ls(parseFechaHistorial(c.fecha)):'',monto:c.monto}) }
+            else if (cta[c.medio]) { const k=cta[c.medio]; k.ventas+=c.monto; k.movs.push({id:`c${o.id}-${k.movs.length}`,tipo:'cobro',numero:c.numero,fechaTxt:c.fecha,fecha:c.dia||'',monto:c.monto}) }
             else ventasBanco+=c.monto
           })
         }
       })
 
-      let egresosTotal=0, egresosBanco=0, egresosEfectivo=0, egresosCajaChica=0, egresosAvealma=0, descAvealmaReg=0
-      const gastosCC=[], gastosAv=[]
+      let egresosTotal=0, egresosBanco=0, egresosEfectivo=0, egresosCajaChica=0
+      const gastosCC=[]
       // Egresos con plata real + pagos de cuentas corrientes a proveedores.
       // Los egresos en canje o 'a pagar' son costo sin movimiento: se saltean.
       const sumarSalida = (x, id) => {
@@ -164,9 +174,10 @@ export default function Caja() {
         const medio=saldoDeMedio(x.medio_pago)
         if (medio==='efectivo') egresosEfectivo+=m
         else if (medio==='caja_chica') { egresosCajaChica+=m; gastosCC.push({id,...x,tipo:'gasto'}) }
-        else if (medio==='avealma') {
-          egresosAvealma+=m; gastosAv.push({id,...x,tipo:x.origen_avealma_liquidacion?'descuento':'gasto'})
-          if (x.origen_avealma_liquidacion) descAvealmaReg+=m
+        else if (cta[medio]) {
+          const k=cta[medio], esDesc=!!x[CUENTAS_LIQ[medio].origen]
+          k.egresos+=m; k.movs.push({id,...x,tipo:esDesc?'descuento':'gasto'})
+          if (esDesc) k.descReg+=m
         }
         else egresosBanco+=m
       }
@@ -188,18 +199,17 @@ export default function Caja() {
         else netoCCBanco+=netoOrigen
       })
 
-      // Transferencias entre cuentas (ej: Avealma nos pasa el neto al banco): no cambian el saldo total
+      // Transferencias entre cuentas (ej: Avealma o GetNet nos pasan el neto al banco): no cambian el saldo total
       const netoMov={}
-      const transfAv=[]
       movCtasSnap.forEach(d => {
         const x={id:d.id,...d.data()}
         if (!posteriorAlCierre(x)) return
         const m=parseFloat(x.monto||0)
         netoMov[x.desde]=(netoMov[x.desde]||0)-m
         netoMov[x.hacia]=(netoMov[x.hacia]||0)+m
-        if (x.desde==='avealma'||x.hacia==='avealma') transfAv.push({...x,tipo:'transferencia'})
+        ;[x.desde,x.hacia].forEach(c=>{ if (cta[c]) cta[c].movs.push({...x,tipo:'transferencia'}) })
       })
-      const netoMovBanco=netoMov.banco||0, netoMovEfectivo=netoMov.efectivo||0, netoMovAvealma=netoMov.avealma||0
+      const netoMovBanco=netoMov.banco||0, netoMovEfectivo=netoMov.efectivo||0, netoMovAvealma=netoMov.avealma||0, netoMovGetnet=netoMov.getnet||0
 
       let ingExtra=0
       const extras=[]
@@ -210,16 +220,22 @@ export default function Caja() {
       const sCE = cierre?.saldo_efectivo!=null ? parseFloat(cierre.saldo_efectivo) : 0
       const sCC = cierre?.saldo_caja_chica!=null ? parseFloat(cierre.saldo_caja_chica) : 0
       const sCA = cierre?.saldo_avealma!=null ? parseFloat(cierre.saldo_avealma) : 0
+      const sCG = cierre?.saldo_getnet!=null ? parseFloat(cierre.saldo_getnet) : 0
       const saldoBanco = sCB+ventasBanco+ingExtra-egresosBanco+netoCCBanco+netoMovBanco
       const saldoEfectivo = sCE+ventasEfectivo-egresosEfectivo+netoCCEfectivo+netoMovEfectivo
       const saldoCajaChica = sCC+repoCajaChica-devCajaChica-egresosCajaChica
-      const saldoAvealma = sCA+ventasAvealma-egresosAvealma+netoMovAvealma
-      // Descuentos que Avealma todavía no aplicó sobre lo cobrado desde el cierre (estimado con los % de Configuración)
-      const pctAv = descCfg.reduce((t,d)=>t+(parseFloat(d.pct)||0),0)
-      const descAvealmaPend = Math.max(ventasAvealma*pctAv/100-descAvealmaReg,0)
+      const saldoAvealma = sCA+cta.avealma.ventas-cta.avealma.egresos+netoMovAvealma
+      const saldoGetnet = sCG+cta.getnet.ventas-cta.getnet.egresos+netoMovGetnet
+      // Descuentos/comisiones todavía no aplicados sobre lo cobrado desde el cierre (estimado con los % de Configuración)
+      const descPend = (k) => {
+        const pct = (appCfg[CUENTAS_LIQ[k].cfgKey]||[]).reduce((t,d)=>t+(parseFloat(d.pct)||0),0)
+        return Math.max(cta[k].ventas*pct/100-cta[k].descReg,0)
+      }
 
-      setKpis({ saldoCierre, ventas, ingExtra, egresos:egresosTotal, saldoActual, ordenes:conMov.size, ventasBanco, ventasEfectivo, egresosBanco, egresosEfectivo, saldoBanco, saldoEfectivo, egresosCajaChica, repoCajaChica, devCajaChica, netoCCBanco, netoCCEfectivo, saldoCajaChica, ventasAvealma, egresosAvealma, netoMovBanco, netoMovAvealma, saldoAvealma, descAvealmaPend })
-      setMovsAvealma([...cobrosAv, ...gastosAv, ...transfAv].sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')))
+      setKpis({ saldoCierre, ventas, ingExtra, egresos:egresosTotal, saldoActual, ordenes:conMov.size, ventasBanco, ventasEfectivo, egresosBanco, egresosEfectivo, saldoBanco, saldoEfectivo, egresosCajaChica, repoCajaChica, devCajaChica, netoCCBanco, netoCCEfectivo, saldoCajaChica,
+        ventasAvealma:cta.avealma.ventas, egresosAvealma:cta.avealma.egresos, netoMovBanco, netoMovAvealma, saldoAvealma, descAvealmaPend:descPend('avealma'),
+        ventasGetnet:cta.getnet.ventas, egresosGetnet:cta.getnet.egresos, netoMovGetnet, saldoGetnet, descGetnetPend:descPend('getnet') })
+      setMovsCuenta(Object.fromEntries(Object.entries(cta).map(([k,v])=>[k,v.movs.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))])))
       setMovsCajaChica([...movsCC, ...gastosCC].sort((a,b)=>(b.fecha+(b.createdAt||'')).localeCompare(a.fecha+(a.createdAt||''))))
       setExtraDocs(extras)
       setSaldoCalc(saldoActual)
@@ -266,13 +282,14 @@ export default function Caja() {
     setProyeccion({saldoActual,totalPendiente:total,saldoProyectado:saldoActual-total,pendientes})
   }
 
-  const openCierre=()=>{setCierreForm({saldo:Math.round(saldoCalc),saldo_banco:Math.round(kpis.saldoBanco),saldo_efectivo:Math.round(kpis.saldoEfectivo),saldo_caja_chica:Math.round(kpis.saldoCajaChica),saldo_avealma:Math.round(kpis.saldoAvealma),fecha:todayStr(),notas:''});setShowCierre(true)}
+  const openCierre=()=>{setCierreForm({saldo:Math.round(saldoCalc),saldo_banco:Math.round(kpis.saldoBanco),saldo_efectivo:Math.round(kpis.saldoEfectivo),saldo_caja_chica:Math.round(kpis.saldoCajaChica),saldo_avealma:Math.round(kpis.saldoAvealma),saldo_getnet:Math.round(kpis.saldoGetnet),fecha:todayStr(),notas:''});setShowCierre(true)}
 
   // Arqueo: lo contado/real contra lo que calcula el sistema desde el último cierre
   const difBanco=(parseFloat(cierreForm.saldo_banco)||0)-Math.round(kpis.saldoBanco)
   const difEfectivo=(parseFloat(cierreForm.saldo_efectivo)||0)-Math.round(kpis.saldoEfectivo)
   const difCajaChica=(parseFloat(cierreForm.saldo_caja_chica)||0)-Math.round(kpis.saldoCajaChica)
   const difAvealma=(parseFloat(cierreForm.saldo_avealma)||0)-Math.round(kpis.saldoAvealma)
+  const difGetnet=(parseFloat(cierreForm.saldo_getnet)||0)-Math.round(kpis.saldoGetnet)
   const difTotal=(parseFloat(cierreForm.saldo)||0)-Math.round(saldoCalc)
 
   const guardarCierre=async()=>{
@@ -280,8 +297,8 @@ export default function Caja() {
     if(!cierreForm.fecha||isNaN(saldo)){toast('Completá fecha y saldo','error');return}
     const ex=await getDocs(query(collection(db,'cierres_caja'),where('fecha','==',cierreForm.fecha)))
     if(!ex.empty){if(!confirm('Ya existe un cierre para esta fecha. ¿Reemplazarlo?')) return; for(const d of ex.docs) await deleteDoc(doc(db,'cierres_caja',d.id))}
-    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,saldo_caja_chica:parseFloat(cierreForm.saldo_caja_chica)||0,saldo_avealma:parseFloat(cierreForm.saldo_avealma)||0,notas:cierreForm.notas,
-      saldo_calculado:Math.round(saldoCalc),diferencia:difTotal,diferencia_banco:difBanco,diferencia_efectivo:difEfectivo,diferencia_caja_chica:difCajaChica,diferencia_avealma:difAvealma,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
+    await addDoc(collection(db,'cierres_caja'),{fecha:cierreForm.fecha,saldo_final:saldo,saldo_banco:parseFloat(cierreForm.saldo_banco)||0,saldo_efectivo:parseFloat(cierreForm.saldo_efectivo)||0,saldo_caja_chica:parseFloat(cierreForm.saldo_caja_chica)||0,saldo_avealma:parseFloat(cierreForm.saldo_avealma)||0,saldo_getnet:parseFloat(cierreForm.saldo_getnet)||0,notas:cierreForm.notas,
+      saldo_calculado:Math.round(saldoCalc),diferencia:difTotal,diferencia_banco:difBanco,diferencia_efectivo:difEfectivo,diferencia_caja_chica:difCajaChica,diferencia_avealma:difAvealma,diferencia_getnet:difGetnet,timestamp:new Date().toISOString(),usuario:user.email,createdAt:new Date().toISOString()})
     await guardarSnapshotDeuda(cierreForm.fecha)
     setShowCierre(false);toast('Cierre guardado','success');loadAll()
   }
@@ -322,39 +339,40 @@ export default function Caja() {
     setShowMovCC(false);toast(movCCForm.tipo==='reposicion'?'Caja chica repuesta':'Devolución registrada','success');loadAll()
   }
 
-  // Liquidación Avealma: descuentos (IVA, IIBB, Ganancias, etc.) como egresos pagados desde la cuenta
-  // de Avealma + transferencia del neto al banco. Ambas partes son opcionales.
-  const calcDescuentos=(facturado)=>avDescCfg.map(d=>({nombre:d.nombre,pct:parseFloat(d.pct)||0,monto:Math.round((parseFloat(facturado)||0)*(parseFloat(d.pct)||0))/100}))
-  const openLiqAv=()=>{
-    const facturado=Math.round(kpis.ventasAvealma)||''
-    const descuentos=calcDescuentos(facturado)
+  // Liquidación de Avealma o GetNet: descuentos/comisiones (IVA, IIBB, arancel, etc.) como egresos pagados
+  // desde la cuenta + transferencia del neto al banco. Ambas partes son opcionales.
+  const calcDescuentos=(cuenta,facturado)=>descCfg[cuenta].map(d=>({nombre:d.nombre,pct:parseFloat(d.pct)||0,monto:Math.round((parseFloat(facturado)||0)*(parseFloat(d.pct)||0))/100}))
+  const openLiq=(cuenta)=>{
+    const facturado=Math.round(cuenta==='getnet'?kpis.ventasGetnet:kpis.ventasAvealma)||''
+    const descuentos=calcDescuentos(cuenta,facturado)
     const neto=(parseFloat(facturado)||0)-descuentos.reduce((t,d)=>t+d.monto,0)
     setLiqForm({fecha:todayStr(),facturado,descuentos,transferir:neto>0?Math.round(neto):'',descripcion:''})
-    setShowLiqAv(true)
+    setShowLiq(cuenta)
   }
   const setFacturado=(v)=>setLiqForm(f=>{
-    const descuentos=calcDescuentos(v)
+    const descuentos=calcDescuentos(showLiq,v)
     const neto=(parseFloat(v)||0)-descuentos.reduce((t,d)=>t+d.monto,0)
     return {...f,facturado:v,descuentos,transferir:neto>0?Math.round(neto):''}
   })
   const liqTotalDesc=liqForm.descuentos.reduce((t,d)=>t+(parseFloat(d.monto)||0),0)
   const liqNeto=(parseFloat(liqForm.facturado)||0)-liqTotalDesc
 
-  const guardarLiqAv=async()=>{
+  const guardarLiq=async()=>{
+    const cuenta=showLiq, info=CUENTAS_LIQ[cuenta]
     const facturado=parseFloat(liqForm.facturado)||0
     const transferir=parseFloat(liqForm.transferir)||0
     const descuentos=liqForm.descuentos.map(d=>({...d,monto:parseFloat(d.monto)||0})).filter(d=>d.monto>0)
     if(!liqForm.fecha||(!descuentos.length&&transferir<=0)){toast('Cargá descuentos o un monto a transferir','error');return}
     const now=new Date().toISOString()
-    const ref=await addDoc(collection(db,'avealma_liquidaciones'),{fecha:liqForm.fecha,facturado,descuentos,transferido:transferir,descripcion:liqForm.descripcion,usuario:user.email,createdAt:now})
+    const ref=await addDoc(collection(db,info.coleccion),{fecha:liqForm.fecha,facturado,descuentos,transferido:transferir,descripcion:liqForm.descripcion,usuario:user.email,createdAt:now})
     for(const d of descuentos){
-      await addDoc(collection(db,'egresos'),{fecha:liqForm.fecha,monto:d.monto,categoria:'impuestos',subcategoria:`Avealma — ${d.nombre}`,
-        descripcion:`${d.nombre} ${d.pct}% sobre ${fmt(facturado)} facturado por Avealma`,medio_pago:'avealma',origen_avealma_liquidacion:ref.id,usuario:user.email,createdAt:now,updatedAt:now})
+      await addDoc(collection(db,'egresos'),{fecha:liqForm.fecha,monto:d.monto,categoria:'impuestos',subcategoria:`${info.label} — ${d.nombre}`,
+        descripcion:`${d.nombre} ${d.pct}% sobre ${fmt(facturado)} ${cuenta==='getnet'?'cobrado con':'facturado por'} ${info.label}`,medio_pago:cuenta,[info.origen]:ref.id,usuario:user.email,createdAt:now,updatedAt:now})
     }
     if(transferir>0){
-      await addDoc(collection(db,'movimientos_cuentas'),{fecha:liqForm.fecha,desde:'avealma',hacia:'banco',monto:transferir,descripcion:liqForm.descripcion||'Transferencia de Avealma',origen_avealma_liquidacion:ref.id,usuario:user.email,createdAt:now})
+      await addDoc(collection(db,'movimientos_cuentas'),{fecha:liqForm.fecha,desde:cuenta,hacia:'banco',monto:transferir,descripcion:liqForm.descripcion||`Transferencia de ${info.label}`,[info.origen]:ref.id,usuario:user.email,createdAt:now})
     }
-    setShowLiqAv(false);toast('Liquidación de Avealma registrada','success');loadAll()
+    setShowLiq(null);toast(`Liquidación de ${info.label} registrada`,'success');loadAll()
   }
 
   const deleteMovCta=async(id)=>{if(!confirm('¿Eliminar esta transferencia?')) return;await deleteDoc(doc(db,'movimientos_cuentas',id));toast('Eliminado');loadAll()}
@@ -406,7 +424,7 @@ export default function Caja() {
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Ingresos extra</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ingExtra)}</span></div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>− Egresos banco</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosBanco)}</span></div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>± Caja chica</span><span style={{color:kpis.netoCCBanco>=0?'var(--success)':'var(--danger)',fontWeight:600}}>{fmt(kpis.netoCCBanco)}</span></div>
-          {kpis.netoMovBanco!==0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>+ Transferencias de Avealma</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.netoMovBanco)}</span></div>}
+          {kpis.netoMovBanco!==0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>+ Transferencias de Avealma / GetNet</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.netoMovBanco)}</span></div>}
           <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>SALDO BANCO</span>
             <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoBanco>=0?'#2e509e':'var(--danger)'}}>{fmt(kpis.saldoBanco)}</span>
@@ -444,7 +462,7 @@ export default function Caja() {
               <svg width="18" height="18" fill="none" stroke="#7c3aed" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
               <span style={{fontFamily:'var(--font-head)',fontWeight:700,fontSize:14,color:'#7c3aed'}}>Avealma</span>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={openLiqAv}>Liquidar</button>
+            <button className="btn btn-secondary btn-sm" onClick={()=>openLiq('avealma')}>Liquidar</button>
           </div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Depósitos de clientes</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ventasAvealma)}</span></div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>− Descuentos y gastos</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosAvealma)}</span></div>
@@ -454,6 +472,23 @@ export default function Caja() {
             <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoAvealma>=0?'#7c3aed':'var(--danger)'}}>{fmt(kpis.saldoAvealma)}</span>
           </div>
           {kpis.descAvealmaPend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>Descuentos sin liquidar (est.): <strong style={{color:'var(--danger)'}}>{fmt(kpis.descAvealmaPend)}</strong> · disponible ≈ {fmt(kpis.saldoAvealma-kpis.descAvealmaPend)}</div>}
+        </div>
+        <div style={{background:'#fff',borderRadius:10,padding:'16px 20px',boxShadow:'var(--shadow)',borderLeft:'4px solid #e30613'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,marginBottom:10}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <svg width="18" height="18" fill="none" stroke="#e30613" strokeWidth="2" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></svg>
+              <span style={{fontFamily:'var(--font-head)',fontWeight:700,fontSize:14,color:'#e30613'}}>GetNet</span>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={()=>openLiq('getnet')}>Liquidar</button>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>+ Cobros con GetNet</span><span style={{color:'var(--success)',fontWeight:600}}>{fmt(kpis.ventasGetnet)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:4}}><span>− Comisiones y gastos</span><span style={{color:'var(--danger)',fontWeight:600}}>{fmt(kpis.egresosGetnet)}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-muted)',marginBottom:8}}><span>± Transferencias</span><span style={{color:kpis.netoMovGetnet>=0?'var(--success)':'var(--danger)',fontWeight:600}}>{fmt(kpis.netoMovGetnet)}</span></div>
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <span style={{fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>SALDO GETNET</span>
+            <span style={{fontFamily:'var(--font-head)',fontWeight:800,fontSize:20,color:kpis.saldoGetnet>=0?'#e30613':'var(--danger)'}}>{fmt(kpis.saldoGetnet)}</span>
+          </div>
+          {kpis.descGetnetPend>0&&<div style={{fontSize:11,color:'var(--text-muted)',marginTop:6}}>Comisiones sin liquidar (est.): <strong style={{color:'var(--danger)'}}>{fmt(kpis.descGetnetPend)}</strong> · disponible ≈ {fmt(kpis.saldoGetnet-kpis.descGetnetPend)}</div>}
         </div>
       </div>
 
@@ -485,16 +520,17 @@ export default function Caja() {
         </div>
       )}
 
-      <div className="table-card">
+      {Object.entries(CUENTAS_LIQ).map(([cuenta,info])=>(
+      <div className="table-card" key={cuenta}>
         <div className="table-card-header">
-          <h3>Movimientos de Avealma</h3>
+          <h3>Movimientos de {info.label}</h3>
           <span style={{fontSize:12,color:'var(--text-muted)'}}>Desde el último cierre</span>
         </div>
-        {movsAvealma.length===0?<div className="empty-state"><p>Sin movimientos de Avealma desde el último cierre. Los depósitos de clientes se registran en el pedido con el método "Avealma".</p></div>:
+        {movsCuenta[cuenta].length===0?<div className="empty-state"><p>Sin movimientos de {info.label} desde el último cierre. {info.vacio}</p></div>:
           <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th className="text-right">Monto</th><th className="text-center">Acciones</th></tr></thead>
-          <tbody>{movsAvealma.map(x=>{
-            const entra = x.tipo==='cobro' || (x.tipo==='transferencia' && x.hacia==='avealma')
-            const badge = {cobro:['badge-green','Depósito'],descuento:['badge-red','Descuento'],gasto:['badge-red','Gasto'],transferencia:['badge-blue','Transferencia']}[x.tipo]
+          <tbody>{movsCuenta[cuenta].map(x=>{
+            const entra = x.tipo==='cobro' || (x.tipo==='transferencia' && x.hacia===cuenta)
+            const badge = {cobro:['badge-green',cuenta==='getnet'?'Cobro':'Depósito'],descuento:['badge-red',cuenta==='getnet'?'Comisión':'Descuento'],gasto:['badge-red','Gasto'],transferencia:['badge-blue','Transferencia']}[x.tipo]
             return (
             <tr key={x.tipo+x.id}>
               <td>{x.tipo==='cobro'?(x.fechaTxt||'-'):fmtDate(x.fecha)}</td>
@@ -502,7 +538,7 @@ export default function Caja() {
               <td>{x.tipo==='cobro'
                 ? <>Pedido #{x.numero}</>
                 : x.tipo==='transferencia'
-                  ? <>{x.desde==='avealma'?'Hacia ':'Desde '}{medioPagoInfo(x.desde==='avealma'?x.hacia:x.desde).label}{x.descripcion?' — '+x.descripcion:''}</>
+                  ? <>{x.desde===cuenta?'Hacia ':'Desde '}{medioPagoInfo(x.desde===cuenta?x.hacia:x.desde).label}{x.descripcion?' — '+x.descripcion:''}</>
                   : <>{x.subcategoria||(x.categoria?getCat(x.categoria).nombre:'Pago a proveedor')}{x.descripcion&&x.tipo==='gasto'?' — '+x.descripcion:''}</>}</td>
               <td className="text-right"><strong style={{color:entra?'var(--success)':'var(--danger)'}}>{entra?'+':'−'}{fmt(x.monto)}</strong></td>
               <td className="text-center">{x.tipo==='transferencia'
@@ -511,6 +547,7 @@ export default function Caja() {
             </tr>)
           })}</tbody></table>}
       </div>
+      ))}
 
       <div className="table-card">
         <div className="table-card-header">
@@ -558,7 +595,7 @@ export default function Caja() {
       <div className="table-card">
         <div className="table-card-header"><h3>Historial de cierres</h3><button className="btn btn-secondary btn-sm" onClick={loadAll}>Actualizar</button></div>
         {historial.length===0?<div className="empty-state"><p>Sin cierres registrados</p></div>:
-          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th className="text-right">Caja chica</th><th className="text-right">Avealma</th><th className="text-right">Diferencia</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
+          <table><thead><tr><th>Fecha</th><th>Hora</th><th className="text-right">Total</th><th className="text-right">Banco</th><th className="text-right">Efectivo</th><th className="text-right">Caja chica</th><th className="text-right">Avealma</th><th className="text-right">GetNet</th><th className="text-right">Diferencia</th><th>Notas</th><th className="text-center">Acciones</th></tr></thead>
           <tbody>{historial.map(c=>(
             <tr key={c.id}>
               <td><strong>{fmtDate(c.fecha)}</strong></td>
@@ -568,6 +605,7 @@ export default function Caja() {
               <td className="text-right" style={{fontSize:13,color:'#FF6B00',fontWeight:600}}>{c.saldo_efectivo!=null?fmt(c.saldo_efectivo):'-'}</td>
               <td className="text-right" style={{fontSize:13,color:'#10b981',fontWeight:600}}>{c.saldo_caja_chica!=null?fmt(c.saldo_caja_chica):'-'}</td>
               <td className="text-right" style={{fontSize:13,color:'#7c3aed',fontWeight:600}}>{c.saldo_avealma!=null?fmt(c.saldo_avealma):'-'}</td>
+              <td className="text-right" style={{fontSize:13,color:'#e30613',fontWeight:600}}>{c.saldo_getnet!=null?fmt(c.saldo_getnet):'-'}</td>
               <td className="text-right" style={{fontSize:12}}>{c.diferencia==null?<span style={{color:'var(--text-muted)'}}>-</span>:<DifCell v={c.diferencia}/>}</td>
               <td style={{fontSize:12,color:'var(--text-muted)'}}>{c.notas||'-'}</td>
               <td className="text-center"><button className="btn btn-danger btn-sm" onClick={()=>deleteCierre(c.id)}>×</button></td>
@@ -588,10 +626,11 @@ export default function Caja() {
                   <tr><td>Efectivo</td><td className="text-right">{fmt(kpis.saldoEfectivo)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_efectivo)||0)}</td><td className="text-right"><DifCell v={difEfectivo}/></td></tr>
                   <tr><td>Caja chica</td><td className="text-right">{fmt(kpis.saldoCajaChica)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_caja_chica)||0)}</td><td className="text-right"><DifCell v={difCajaChica}/></td></tr>
                   <tr><td>Avealma</td><td className="text-right">{fmt(kpis.saldoAvealma)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_avealma)||0)}</td><td className="text-right"><DifCell v={difAvealma}/></td></tr>
+                  <tr><td>GetNet</td><td className="text-right">{fmt(kpis.saldoGetnet)}</td><td className="text-right">{fmt(parseFloat(cierreForm.saldo_getnet)||0)}</td><td className="text-right"><DifCell v={difGetnet}/></td></tr>
                   <tr><td><strong>Total</strong></td><td className="text-right"><strong>{fmt(saldoCalc)}</strong></td><td className="text-right"><strong>{fmt(parseFloat(cierreForm.saldo)||0)}</strong></td><td className="text-right"><DifCell v={difTotal}/></td></tr>
                 </tbody>
               </table>
-              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>Cargá lo que realmente hay en el banco y lo que contaste en efectivo y en caja chica, y el saldo que informa Avealma. Si hay diferencia, anotá el motivo en notas.</div>
+              <div style={{fontSize:11,color:'var(--text-muted)',marginTop:8}}>Cargá lo que realmente hay en el banco y lo que contaste en efectivo y en caja chica, y los saldos que informan Avealma y GetNet. Si hay diferencia, anotá el motivo en notas.</div>
             </div>
             <div className="field"><label>Saldo total en cuenta ($)</label><input type="number" value={cierreForm.saldo} onChange={e=>setCierreForm(f=>({...f,saldo:e.target.value}))}/></div>
             <div className="field-row">
@@ -599,7 +638,10 @@ export default function Caja() {
               <div className="field"><label>Del cual, en efectivo ($)</label><input type="number" value={cierreForm.saldo_efectivo} onChange={e=>setCierreForm(f=>({...f,saldo_efectivo:e.target.value}))} placeholder="0"/></div>
             </div>
             <div className="field"><label>Del cual, en caja chica ($)</label><input type="number" value={cierreForm.saldo_caja_chica} onChange={e=>setCierreForm(f=>({...f,saldo_caja_chica:e.target.value}))} placeholder="0"/></div>
-            <div className="field"><label>Del cual, en Avealma ($)</label><input type="number" value={cierreForm.saldo_avealma} onChange={e=>setCierreForm(f=>({...f,saldo_avealma:e.target.value}))} placeholder="0"/></div>
+            <div className="field-row">
+              <div className="field"><label>Del cual, en Avealma ($)</label><input type="number" value={cierreForm.saldo_avealma} onChange={e=>setCierreForm(f=>({...f,saldo_avealma:e.target.value}))} placeholder="0"/></div>
+              <div className="field"><label>Del cual, en GetNet ($)</label><input type="number" value={cierreForm.saldo_getnet} onChange={e=>setCierreForm(f=>({...f,saldo_getnet:e.target.value}))} placeholder="0"/></div>
+            </div>
             <div className="field"><label>Fecha del cierre</label><input type="date" value={cierreForm.fecha} onChange={e=>setCierreForm(f=>({...f,fecha:e.target.value}))}/></div>
             <div className="field"><label>Notas (opcional)</label><textarea value={cierreForm.notas} onChange={e=>setCierreForm(f=>({...f,notas:e.target.value}))} placeholder="Observaciones..."/></div>
             <div className="modal-footer">
@@ -610,20 +652,20 @@ export default function Caja() {
         </div>
       )}
 
-      {showLiqAv&&(
-        <div className="modal-overlay open" onClick={e=>e.target===e.currentTarget&&setShowLiqAv(false)}>
+      {showLiq&&(
+        <div className="modal-overlay open" onClick={e=>e.target===e.currentTarget&&setShowLiq(null)}>
           <div className="modal" style={{width:460}}>
-            <div className="modal-header"><h3>Liquidación de Avealma</h3><button className="modal-close" onClick={()=>setShowLiqAv(false)}>×</button></div>
+            <div className="modal-header"><h3>Liquidación de {CUENTAS_LIQ[showLiq].label}</h3><button className="modal-close" onClick={()=>setShowLiq(null)}>×</button></div>
             <div style={{background:'#f0f4f8',borderRadius:8,padding:14,marginBottom:16,fontSize:13}}>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{color:'var(--text-muted)'}}>Depositado en Avealma desde el último cierre:</span><strong>{fmt(kpis.ventasAvealma)}</strong></div>
-              <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Saldo Avealma estimado:</span><strong>{fmt(kpis.saldoAvealma)}</strong></div>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span style={{color:'var(--text-muted)'}}>{CUENTAS_LIQ[showLiq].entrada} desde el último cierre:</span><strong>{fmt(showLiq==='getnet'?kpis.ventasGetnet:kpis.ventasAvealma)}</strong></div>
+              <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Saldo {CUENTAS_LIQ[showLiq].label} estimado:</span><strong>{fmt(showLiq==='getnet'?kpis.saldoGetnet:kpis.saldoAvealma)}</strong></div>
             </div>
             <div className="field-row">
               <div className="field"><label>Fecha</label><input type="date" value={liqForm.fecha} onChange={e=>setLiqForm(f=>({...f,fecha:e.target.value}))}/></div>
-              <div className="field"><label>Monto facturado ($)</label><input type="number" value={liqForm.facturado} onChange={e=>setFacturado(e.target.value)} placeholder="0"/></div>
+              <div className="field"><label>{CUENTAS_LIQ[showLiq].montoLabel}</label><input type="number" value={liqForm.facturado} onChange={e=>setFacturado(e.target.value)} placeholder="0"/></div>
             </div>
-            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--text-muted)',margin:'4px 0 8px'}}>Descuentos (se registran como egresos)</div>
-            {liqForm.descuentos.length===0&&<p style={{fontSize:12,color:'var(--text-muted)'}}>No hay descuentos configurados. Cargalos en Configuración → Avealma.</p>}
+            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--text-muted)',margin:'4px 0 8px'}}>{showLiq==='getnet'?'Comisiones':'Descuentos'} (se registran como egresos)</div>
+            {liqForm.descuentos.length===0&&<p style={{fontSize:12,color:'var(--text-muted)'}}>No hay {showLiq==='getnet'?'comisiones':'descuentos'} configurados. Cargalos en {CUENTAS_LIQ[showLiq].cfgHint}.</p>}
             {liqForm.descuentos.map((d,i)=>(
               <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,fontSize:13}}>
                 <span style={{flex:1}}>{d.nombre} <span style={{color:'var(--text-muted)'}}>({d.pct}%)</span></span>
@@ -631,13 +673,13 @@ export default function Caja() {
               </div>
             ))}
             <div style={{display:'flex',justifyContent:'space-between',borderTop:'1px solid var(--border)',paddingTop:8,margin:'8px 0 14px',fontSize:13}}>
-              <span>Neto (facturado − descuentos)</span><strong>{fmt(liqNeto)}</strong>
+              <span>Neto ({showLiq==='getnet'?'liquidado − comisiones':'facturado − descuentos'})</span><strong>{fmt(liqNeto)}</strong>
             </div>
             <div className="field"><label>Transferir al banco ahora ($)</label><input type="number" value={liqForm.transferir} onChange={e=>setLiqForm(f=>({...f,transferir:e.target.value}))} placeholder="0 = no transferir todavía"/></div>
-            <div className="field"><label>Descripción (opcional)</label><textarea value={liqForm.descripcion} onChange={e=>setLiqForm(f=>({...f,descripcion:e.target.value}))} placeholder="Ej: Liquidación quincena 1 de octubre"/></div>
+            <div className="field"><label>Descripción (opcional)</label><textarea value={liqForm.descripcion} onChange={e=>setLiqForm(f=>({...f,descripcion:e.target.value}))} placeholder={CUENTAS_LIQ[showLiq].placeholder}/></div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={()=>setShowLiqAv(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={guardarLiqAv}>Registrar</button>
+              <button className="btn btn-secondary" onClick={()=>setShowLiq(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardarLiq}>Registrar</button>
             </div>
           </div>
         </div>

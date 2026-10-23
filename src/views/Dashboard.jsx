@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({
     vendido: 0, egresos: 0, balance: 0, compMes: 0, ordenes: 0, compItems: 0,
-    cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0, saldoCajaChica: 0, saldoAvealma: 0
+    cobrado: 0, pendiente: 0, ingresosExtra: 0, saldoBanco: 0, saldoEfectivo: 0, saldoCajaChica: 0, saldoAvealma: 0, saldoGetnet: 0
   })
   const [comisionMP, setComisionMP] = useState({ total: 0, tieneReal: false })
   const [comisionGetnet, setComisionGetnet] = useState({ base: 0, pct: 0, total: 0 })
@@ -123,21 +123,22 @@ export default function Dashboard() {
       }
     })
 
-    // Saldo banco, efectivo y caja chica del último cierre
-    let saldoBanco = 0, saldoEfectivo = 0, saldoCajaChica = 0, saldoAvealma = 0
+    // Saldo de cada cuenta en el último cierre
+    let saldoBanco = 0, saldoEfectivo = 0, saldoCajaChica = 0, saldoAvealma = 0, saldoGetnet = 0
     cierreSnap.forEach(d => {
       const c = d.data()
       saldoBanco = parseFloat(c.saldo_banco || c.saldo_final || 0)
       saldoEfectivo = parseFloat(c.saldo_efectivo || 0)
       saldoCajaChica = parseFloat(c.saldo_caja_chica || 0)
       saldoAvealma = parseFloat(c.saldo_avealma || 0)
+      saldoGetnet = parseFloat(c.saldo_getnet || 0)
     })
 
     setKpis({
       vendido, egresos: totalEgresos,
       balance: cobrado + ingresosExtra - totalEgresos,
       compMes, ordenes: filtrados.length, compItems,
-      cobrado, pendiente, ingresosExtra, saldoBanco, saldoEfectivo, saldoCajaChica, saldoAvealma
+      cobrado, pendiente, ingresosExtra, saldoBanco, saldoEfectivo, saldoCajaChica, saldoAvealma, saldoGetnet
     })
     setOrders(filtrados.slice(0, 8))
 
@@ -243,6 +244,11 @@ export default function Dashboard() {
         <div className="stat-card" style={{ borderLeft: '4px solid #7c3aed' }}>
           <div className="card-label">🧾 Avealma</div>
           <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.saldoAvealma)}</div>
+          <div className="card-sub">último cierre</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: '4px solid #e30613' }}>
+          <div className="card-label">💳 GetNet</div>
+          <div className="card-value" style={{ fontSize: 20 }}>{fmt(kpis.saldoGetnet)}</div>
           <div className="card-sub">último cierre</div>
         </div>
         <div className="stat-card" style={{ borderLeft: '4px solid #009ee3' }}>
