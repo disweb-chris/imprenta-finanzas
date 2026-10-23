@@ -28,6 +28,12 @@ export function pagadoOnline(order) {
   return pasarela && !!(order.date_paid || order.transaction_id)
 }
 
+// Método del historial de pagos que corresponde a una pasarela online (Mercado Pago o GetNet)
+export function esMetodoOnline(metodo) {
+  const m = String(metodo || '').toLowerCase().replace(/[\s_-]/g, '')
+  return m.includes('mercadopago') || m.includes('getnet')
+}
+
 // Ingreso real de un pedido: si tiene historial de pagos del metabox, usamos la suma
 // de esos montos (evita distorsión por señas/descuentos). Sin historial, solo se da por
 // cobrado el total si se pagó online; si no, no hay nada cobrado todavía.
