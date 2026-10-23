@@ -59,27 +59,3 @@ export const saveWCConfig = (url, key, secret) => {
 
 export const getWCConfig = getWC
 
-// Busca clientes registrados de WooCommerce por nombre, usuario o email
-export const searchCustomers = async (search) => {
-  const q = (search || '').trim()
-  if (q.length < 2) return []
-  return wcFetch(`/customers?search=${encodeURIComponent(q)}&per_page=10`)
-}
-
-// Busca un pedido por su número. El número suele ser el id; si no coincide, se busca por texto.
-export const findOrder = async (numero) => {
-  const n = String(numero || '').replace('#', '').trim()
-  if (!/^\d+$/.test(n)) return null
-  try {
-    const o = await wcFetch(`/orders/${n}`)
-    if (String(o.number) === n) return o
-  } catch { /* no hay pedido con ese id */ }
-  const res = await wcFetch(`/orders?search=${n}&per_page=20`)
-  return res.find(o => String(o.number) === n) || null
-}
-
-// Carga en cada línea del pedido su «Costo a mano» por unidad (plugin IO Costos, que recalcula
-// el costo y la ganancia del pedido). lineas: [{ id, costo_unitario }]. Devuelve el costo del
-// pedido ya recalculado, con la misma forma que `order.io_costos`.
-export const cargarCostosPedido = (orderId, lineas, referencia = '') =>
-  wcRequest(`/pedidos/${orderId}/costos`, { method: 'POST', base: 'io-costos/v1', body: { lineas, referencia } })

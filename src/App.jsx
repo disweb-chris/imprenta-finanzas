@@ -16,8 +16,7 @@ const Liquidacion = lazy(() => import('./views/Liquidacion'))
 const PagosVariables = lazy(() => import('./views/PagosVariables'))
 const Presupuesto = lazy(() => import('./views/Presupuesto'))
 const RentabilidadPedidos = lazy(() => import('./views/RentabilidadPedidos'))
-const Cotizaciones = lazy(() => import('./views/Cotizaciones'))
-const Calculadora = lazy(() => import('./views/Calculadora'))
+const CalculadoraEnWordPress = lazy(() => import('./views/CalculadoraEnWordPress'))
 const Impuestos = lazy(() => import('./views/Impuestos'))
 const CuentasPagar = lazy(() => import('./views/CuentasPagar'))
 const Cobranza = lazy(() => import('./views/Cobranza'))
@@ -44,7 +43,8 @@ export default function App() {
   if (user === undefined || role === undefined) return <Loader />
   if (!user) return <Login />
 
-  // Rol restringido: solo la calculadora, sin sidebar ni acceso a ninguna otra pantalla
+  // Rol restringido: sin sidebar ni acceso a ninguna pantalla. Antes veía la calculadora,
+  // que pasó a WordPress: se le muestra dónde está ahora.
   // Nota: sin className="app-layout" a propósito — esa clase fija height:100vh y
   // overflow:hidden para el layout con sidebar, y acá cortaría el scroll de la página.
   if (role === 'gestor') {
@@ -59,7 +59,7 @@ export default function App() {
         </div>
         <main>
           <Suspense fallback={<Loader />}>
-            <Calculadora />
+            <CalculadoraEnWordPress />
           </Suspense>
         </main>
       </div>
@@ -96,8 +96,8 @@ export default function App() {
             <Route path="/finanzas/pagos-variables" element={<PagosVariables />} />
             <Route path="/finanzas/presupuesto" element={<Presupuesto />} />
             <Route path="/finanzas/rentabilidad-pedidos" element={<RentabilidadPedidos />} />
-            <Route path="/finanzas/cotizaciones" element={<Cotizaciones />} />
-            <Route path="/finanzas/calculadora" element={<Calculadora />} />
+            <Route path="/finanzas/cotizaciones" element={<CalculadoraEnWordPress />} />
+            <Route path="/finanzas/calculadora" element={<CalculadoraEnWordPress />} />
             <Route path="/finanzas/impuestos" element={<Impuestos />} />
             <Route path="/finanzas/cuentas-pagar" element={<CuentasPagar />} />
             <Route path="/finanzas/cobranza" element={<Cobranza />} />

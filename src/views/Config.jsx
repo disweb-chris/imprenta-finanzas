@@ -247,13 +247,13 @@ export default function Config() {
         <div className="table-card-header"><h3>Accesos restringidos</h3></div>
         <div style={{ padding: '16px 20px 4px' }}>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            Un usuario con rol <strong>Gestor</strong> solo ve la Calculadora al iniciar sesión — sin acceso a ninguna otra pantalla de Finanzas. Cualquier email sin registro acá tiene acceso completo (Admin). Primero creá el login en Firebase Console → Authentication → Add user, y después asignale el rol acá.
+            Un usuario con rol <strong>Gestor</strong> no ve ninguna pantalla de Finanzas: al iniciar sesión se le indica que la calculadora está en WordPress (Imprenta Online → Calculadora). Cualquier email sin registro acá tiene acceso completo (Admin). Primero creá el login en Firebase Console → Authentication → Add user, y después asignale el rol acá.
           </p>
           <div className="field-row">
             <div className="field"><label>Email</label><input value={roleForm.email} onChange={e => setRoleForm(f => ({ ...f, email: e.target.value }))} placeholder="gestor@imprentaonline.ar" /></div>
             <div className="field"><label>Rol</label>
               <select value={roleForm.rol} onChange={e => setRoleForm(f => ({ ...f, rol: e.target.value }))}>
-                <option value="gestor">Gestor (solo Calculadora)</option>
+                <option value="gestor">Gestor (sin acceso a Finanzas)</option>
                 <option value="admin">Admin (acceso completo)</option>
               </select>
             </div>
