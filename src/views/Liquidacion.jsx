@@ -7,7 +7,6 @@ import { crearCuentaPagar } from '../utils/cuentasPagar'
 import { costoLinea } from '../utils/pedidos'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
-import VincularCosto from '../components/VincularCosto'
 
 const DEFAULT_PROVEEDORES = ['Proveedor principal', 'Papel y materiales', 'Tinta', 'Sublimación', 'Otros']
 
@@ -63,9 +62,6 @@ export default function Liquidacion() {
 
   // Líneas de la liquidación actual
   const [lineas, setLineas] = useState([])
-  const [orders, setOrders] = useState([])
-  // Modal «Traer costo de la calculadora»: { order } con el pedido elegido, o {} para elegirlo adentro
-  const [vincular, setVincular] = useState(null)
   const [calculando, setCalculando] = useState(false)
   const [calculado, setCalculado] = useState(false)
   const [registrando, setRegistrando] = useState(false)
@@ -105,7 +101,6 @@ export default function Liquidacion() {
       const start = new Date(periodoStart + 'T00:00:00')
       const end = new Date(periodoEnd + 'T23:59:59')
       const ords = await fetchOrders(start, end, 'completed,processing')
-      setOrders(ords)
 
       // Convertir a líneas editables
       const nuevasLineas = ords.flatMap(costosDelPedido)
@@ -130,29 +125,6 @@ export default function Liquidacion() {
       toast('Error al calcular: ' + e.message, 'error')
     }
     setCalculando(false)
-  }
-
-  // ── Costo traído de la calculadora ───────────────────────
-  // Rehace las líneas de ese pedido con el costo nuevo; conserva proveedor y medio ya elegidos
-  const costoAplicado = ({ order }) => {
-    if (!orders.some(o => o.id === order.id)) {
-      toast(`El pedido #${order.number} no es del período elegido: su costo queda cargado en la tienda`)
-      return
-    }
-    setOrders(prev => prev.map(o => o.id === order.id ? order : o))
-    setLineas(prev => {
-      const anteriores = Object.fromEntries(prev.filter(l => l.pedido_id === order.id).map(l => [l.key, l]))
-      const nuevas = costosDelPedido(order).map(p => ({
-        ...p,
-        costo_ajustado: p.costo_calculado,
-        proveedor: anteriores[p.key]?.proveedor || proveedores[0],
-        medio_pago: anteriores[p.key]?.medio_pago || 'banco',
-        incluir: anteriores[p.key]?.incluir ?? true,
-      }))
-      const idx = prev.findIndex(l => l.pedido_id === order.id)
-      const resto = prev.filter(l => l.pedido_id !== order.id)
-      return idx === -1 ? [...nuevas, ...resto] : [...resto.slice(0, idx), ...nuevas, ...resto.slice(idx)]
-    })
   }
 
   // ── Editar línea ─────────────────────────────────────────
@@ -333,14 +305,9 @@ export default function Liquidacion() {
           <div className="table-card" style={{ marginBottom: 16 }}>
             <div className="table-card-header">
               <h3>Líneas de costo</h3>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => setVincular({})}>
-                  Traer costo de la calculadora
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={addLinea}>
-                  + Agregar línea manual
-                </button>
-              </div>
+              <button className="btn btn-secondary btn-sm" onClick={addLinea}>
+                + Agregar línea manual
+              </button>
             </div>
             <table>
               <thead>
@@ -364,15 +331,8 @@ export default function Liquidacion() {
                         onChange={e => updateLinea(i, 'incluir', e.target.checked)}
                         style={{ cursor: 'pointer', width: 16, height: 16 }} />
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                       {l.pedido_numero ? `#${l.pedido_numero}` : '-'}
-                      {l.pedido_id && (
-                        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6, padding: '2px 6px', fontSize: 10 }}
-                          title="Cargar en este pedido un costo de la calculadora"
-                          onClick={() => setVincular({ order: orders.find(o => o.id === l.pedido_id) })}>
-                          Traer costo
-                        </button>
-                      )}
                     </td>
                     <td>
                       {l.manual
@@ -535,10 +495,6 @@ export default function Liquidacion() {
               </table>
         }
       </div>
-
-      {vincular && (
-        <VincularCosto order={vincular.order || null} onClose={() => setVincular(null)} onAplicado={costoAplicado} />
-      )}
 
       {/* Modal detalle liquidación */}
       {showDetalle && (
