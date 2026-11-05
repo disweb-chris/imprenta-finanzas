@@ -262,6 +262,13 @@ export function registerWebTools(server) {
     (c) => api('POST', 'variables', { cuerpo: c })
   );
 
+  herramienta(
+    'listar_cobranza',
+    'Los pedidos con saldo de los últimos 6 meses, por antigüedad, y a quién ya se le recordó. Sin teléfonos: el recordatorio por WhatsApp sale de la pantalla Cobranza.',
+    {}, LECTURA,
+    () => api('GET', 'cobranza')
+  );
+
   // ── Cierres y liquidaciones (solo lectura) ─────────────────────────────────
   herramienta(
     'listar_cierres_caja',
