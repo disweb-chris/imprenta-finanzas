@@ -23,6 +23,26 @@ se ve igual en la app. En el campo `usuario` queda `MCP_USUARIO` (por defecto `c
 `registrar_pago_compromiso` hace lo mismo que el botón "Pagar" de Compromisos: crea el egreso
 y avanza el compromiso (cuotas, sueldos con pagos parciales, recurrentes).
 
+## Firebase o IO Finanzas
+
+Con estas dos variables en el servicio, todas las herramientas hablan con IO Finanzas
+(WordPress) en vez de Firebase. Sin ellas, sigue todo como antes. Las herramientas se llaman
+igual; se suma `listar_cuentas`.
+
+| Variable | Qué es |
+|---|---|
+| `IO_FINANZAS_URL` | La dirección del sitio |
+| `IO_FINANZAS_CLAVE` | Una clave de alcance **completo** de Finanzas → Ajustes → Conexiones |
+
+```bash
+gcloud run services update mcp-finanzas --project imprenta-online-finanzas --region us-central1 \
+  --update-env-vars IO_FINANZAS_URL=https://imprentaonline.ar,IO_FINANZAS_CLAVE=<LA_CLAVE>
+```
+
+Para volver a Firebase: `--remove-env-vars IO_FINANZAS_URL,IO_FINANZAS_CLAVE`.
+
+En IO Finanzas, "eliminar" no borra: un gasto o un ingreso queda anulado y un compromiso, finalizado.
+
 ## Seguridad
 
 El servidor escribe en Firestore, así que **no arranca sin `MCP_ACCESS_TOKEN`**.

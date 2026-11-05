@@ -7,8 +7,14 @@ import { registerPresupuestos }   from './presupuestos.js';
 import { registerPvMontos }       from './pv_montos.js';
 import { registerResumenMensual } from './resumen_mensual.js';
 import { registerCategorias }     from './categorias.js';
+import { registerWebTools, usaWeb } from './web.js';
 
 export function registerAllTools(server) {
+  // Con IO_FINANZAS_URL e IO_FINANZAS_CLAVE, todo habla con la web; sin ellas, con Firebase.
+  if (usaWeb()) {
+    registerWebTools(server);
+    return;
+  }
   registerEgresos(server);
   registerCompromisos(server);
   registerCierresCaja(server);
