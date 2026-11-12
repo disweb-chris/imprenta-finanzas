@@ -1,4 +1,10 @@
-// Credenciales de WooCommerce — solo desde localStorage (configurables en Configuración)
+import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { db } from '../firebase/config'
+
+// Credenciales de WooCommerce. Se guardan en Firestore (config/woocommerce, solo admins) para que
+// sirvan en cualquier navegador, y se copian a localStorage para leerlas sin esperar a la red.
+const WC_DOC = doc(db, 'config', 'woocommerce')
+
 const getWC = () => ({
   url: localStorage.getItem('wc_url') || '',
   key: localStorage.getItem('wc_key') || '',
@@ -51,10 +57,32 @@ export const fetchOrders = async (startDate, endDate, status = 'completed,proces
   return orders
 }
 
-export const saveWCConfig = (url, key, secret) => {
+const guardarLocal = (url, key, secret) => {
   localStorage.setItem('wc_url', url)
   localStorage.setItem('wc_key', key)
   localStorage.setItem('wc_secret', secret)
+}
+
+export const saveWCConfig = async (url, key, secret) => {
+  guardarLocal(url, key, secret)
+  await setDoc(WC_DOC, { url, key, secret, updatedAt: new Date().toISOString() })
+}
+
+// Al iniciar sesión: trae las claves de Firestore. Si todavía no hay nada guardado ahí pero este
+// navegador las tiene, las sube, así quedan disponibles en los demás.
+export const loadWCConfig = async () => {
+  try {
+    const snap = await getDoc(WC_DOC)
+    const d = snap.exists() ? snap.data() : null
+    if (d?.url && d?.key && d?.secret) {
+      guardarLocal(d.url, d.key, d.secret)
+      return
+    }
+    const { url, key, secret } = getWC()
+    if (url && key && secret) await setDoc(WC_DOC, { url, key, secret, updatedAt: new Date().toISOString() })
+  } catch (e) {
+    console.warn('No se pudieron leer las claves de WooCommerce de Firestore:', e.message)
+  }
 }
 
 export const getWCConfig = getWC

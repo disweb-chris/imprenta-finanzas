@@ -110,9 +110,13 @@ export default function Config() {
     toast(n > 0 ? `${n} cierres migrados correctamente` : 'Todos los cierres ya tienen timestamp', 'success')
   }
 
-  const saveWC = () => {
-    saveWCConfig(wcForm.url.replace(/\/$/, ''), wcForm.key, wcForm.secret)
-    toast('Configuración guardada', 'success')
+  const saveWC = async () => {
+    try {
+      await saveWCConfig(wcForm.url.trim().replace(/\/$/, ''), wcForm.key.trim(), wcForm.secret.trim())
+      toast('Configuración guardada', 'success')
+    } catch (e) {
+      toast('Quedó guardada solo en este navegador: ' + e.message, 'error')
+    }
   }
 
   const testWC = async () => {

@@ -15,6 +15,7 @@ export default function Ingresos() {
   const { getPeriodDates, periodLabel } = usePeriod()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [status, setStatus] = useState('completed')
   const [kpis, setKpis] = useState({ total: 0, avg: 0, shipping: 0, count: 0, avealma: 0, countAvealma: 0, getnet: 0, countGetnet: 0 })
 
@@ -22,8 +23,14 @@ export default function Ingresos() {
 
   const load = async () => {
     setLoading(true)
+    setError('')
     const { start, end } = getPeriodDates()
-    const ords = await fetchOrders(start, end, status || 'any').catch(() => [])
+    let ords = []
+    try {
+      ords = await fetchOrders(start, end, status || 'any')
+    } catch (e) {
+      setError(e.message || 'No se pudieron traer las órdenes de WooCommerce')
+    }
 
     // Filtrar pedidos de Cobro Saldo (flujo viejo)
     const filtrados = ords.filter(o => !esPedidoCobroSaldo(o))
@@ -65,6 +72,8 @@ export default function Ingresos() {
         <div className="table-card-header"><h3>Órdenes</h3></div>
         {loading
           ? <div className="loading-state"><div className="spinner" /><p style={{ marginTop: 12 }}>Cargando...</p></div>
+          : error
+            ? <div className="empty-state"><p style={{ color: '#dc2626' }}>No se pudieron cargar las órdenes: {error}</p></div>
           : orders.length === 0
             ? <div className="empty-state"><p>Sin órdenes en el período</p></div>
             : (
