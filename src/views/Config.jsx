@@ -3,7 +3,7 @@ import { collection, getDocs, updateDoc, setDoc, deleteDoc, doc } from 'firebase
 import { db } from '../firebase/config'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
-import { saveWCConfig, getWCConfig, wcFetch } from '../utils/woocommerce'
+import { saveWCConfig, getWCConfig, probarWC } from '../utils/woocommerce'
 import { getAppConfig, saveAppConfig } from '../utils/appConfig'
 import { DEFAULT_CATS, fmt } from '../utils/helpers'
 import ListaPorcentajes from '../components/ListaPorcentajes'
@@ -122,8 +122,11 @@ export default function Config() {
   const testWC = async () => {
     setTestResult('Probando...')
     try {
-      await wcFetch('/products?per_page=1')
-      setTestResult('✓ Conexión exitosa')
+      // Prueba lo que está escrito en el formulario, aunque todavía no se haya guardado
+      await probarWC({ url: wcForm.url.trim().replace(/\/$/, ''), key: wcForm.key.trim(), secret: wcForm.secret.trim() })
+      const w = getWCConfig()
+      const sinGuardar = w.url !== wcForm.url.trim().replace(/\/$/, '') || w.key !== wcForm.key.trim() || w.secret !== wcForm.secret.trim()
+      setTestResult(sinGuardar ? '✓ Conexión exitosa — falta tocar Guardar' : '✓ Conexión exitosa')
     } catch (e) {
       setTestResult('✗ Error: ' + e.message)
     }

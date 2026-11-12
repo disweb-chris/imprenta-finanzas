@@ -11,19 +11,15 @@ const getWC = () => ({
   secret: localStorage.getItem('wc_secret') || '',
 })
 
-const wcAuth = () => {
-  const { key, secret } = getWC()
-  return 'Basic ' + btoa(`${key}:${secret}`)
-}
-
 // base: 'wc/v3' para la API de WooCommerce, 'io-costos/v1' para la del plugin IO Costos
 // (acepta las mismas claves). Los errores traen el mensaje que devuelve la tienda.
-const wcRequest = async (endpoint, { method = 'GET', body, base = 'wc/v3' } = {}) => {
-  const { url, key, secret } = getWC()
+// cfg: claves a usar en vez de las guardadas (para probar las del formulario antes de guardarlas).
+const wcRequest = async (endpoint, { method = 'GET', body, base = 'wc/v3', cfg } = {}) => {
+  const { url, key, secret } = cfg || getWC()
   if (!url || !key || !secret) {
     throw new Error('Configurá la conexión a WooCommerce en Configuración antes de continuar')
   }
-  const headers = { Authorization: wcAuth() }
+  const headers = { Authorization: 'Basic ' + btoa(`${key}:${secret}`) }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const r = await fetch(`${url}/wp-json/${base}${endpoint}`, {
     method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -37,6 +33,9 @@ const wcRequest = async (endpoint, { method = 'GET', body, base = 'wc/v3' } = {}
 }
 
 export const wcFetch = (endpoint) => wcRequest(endpoint)
+
+// Prueba unas claves sin guardarlas (botón «Probar conexión» de Configuración)
+export const probarWC = (cfg) => wcRequest('/products?per_page=1', { cfg })
 
 // Fetch orders between two Date objects (supports full timestamp for caja logic)
 export const fetchOrders = async (startDate, endDate, status = 'completed,processing') => {
