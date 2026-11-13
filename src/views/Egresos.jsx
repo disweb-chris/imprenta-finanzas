@@ -6,6 +6,7 @@ import { usePeriod } from '../context/PeriodContext'
 import { useCats } from '../context/CatContext'
 import { useToast } from '../components/Toast'
 import { useAuth } from '../context/AuthContext'
+import { exportarEgresos } from '../utils/exportar'
 
 const _ls = (d) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')
 
@@ -86,11 +87,19 @@ export default function Egresos() {
   const sueldoComps = compromisos.filter(c => c.categoria === 'sueldos')
   const filtered = egresos.filter(e => !search || (e.descripcion || '').toLowerCase().includes(search.toLowerCase()) || getCat(e.categoria).nombre.toLowerCase().includes(search.toLowerCase()))
 
+  const descargarExcel = () => {
+    const { start, end } = getPeriodDates()
+    exportarEgresos(`egresos_${_ls(start)}_${_ls(end)}.csv`, filtered, getCat)
+  }
+
   return (
     <div className="view">
       <div className="view-header-row">
         <div><h2>Egresos</h2><p>Gastos registrados — {periodLabel()}</p></div>
-        <button className="btn btn-primary" onClick={() => { openNew(); setShowModal(true) }}>+ Nuevo egreso</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" disabled={loading || filtered.length === 0} title="Descarga los egresos de la tabla, con los filtros aplicados" onClick={descargarExcel}>⬇ Descargar Excel</button>
+          <button className="btn btn-primary" onClick={() => { openNew(); setShowModal(true) }}>+ Nuevo egreso</button>
+        </div>
       </div>
 
       <div className="cards-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
