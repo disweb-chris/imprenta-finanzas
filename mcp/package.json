@@ -1,0 +1,16 @@
+{
+  "name": "mcp-finanzas-imprentaonline",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "axios": "^1.6.8",
+    "express": "^4.18.3",
+    "firebase-admin": "^12.1.0",
+    "zod": "^3.22.4"
+  }
+}

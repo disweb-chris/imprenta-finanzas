@@ -5,7 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // mcp/ es el servidor MCP en Node, con su propio package.json
+  globalIgnores(['dist', 'mcp']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
